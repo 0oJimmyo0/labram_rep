@@ -15,6 +15,18 @@ from timm.utils import ModelEma
 import utils
 from einops import rearrange
 
+def ensure_patch_tensor(samples, patch_size=200):
+    if samples.ndim == 4:
+        return samples
+    if samples.ndim == 3:
+        if samples.shape[-1] % patch_size != 0:
+            raise ValueError(
+                f"Expected flattened EEG sample with trailing dimension divisible by {patch_size}, "
+                f"got shape={tuple(samples.shape)}"
+            )
+        return rearrange(samples, 'B N (A T) -> B N A T', T=patch_size)
+    raise ValueError(f"Expected EEG batch with 3 or 4 dimensions, got shape={tuple(samples.shape)}")
+
 def train_class_batch(model, samples, target, criterion, ch_names):
     outputs = model(samples, ch_names)
     loss = criterion(outputs, target)
@@ -62,7 +74,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     param_group["weight_decay"] = wd_schedule_values[it]
 
         samples = samples.float().to(device, non_blocking=True) / 100
-        samples = rearrange(samples, 'B N (A T) -> B N A T', T=200)
+        samples = ensure_patch_tensor(samples, patch_size=200)
         
         targets = targets.to(device, non_blocking=True)
         if is_binary:
@@ -73,7 +85,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             loss, output = train_class_batch(
                 model, samples, targets, criterion, input_chans)
         else:
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
                 loss, output = train_class_batch(
                     model, samples, targets, criterion, input_chans)
 
@@ -161,23 +173,23 @@ def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=
         criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
-    #header = 'Test:'
 
     # switch to evaluation mode
     model.eval()
     pred = []
     true = []
-    for step, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+    print_freq = max(len(data_loader), 1)
+    for step, batch in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         EEG = batch[0]
         target = batch[-1]
         EEG = EEG.float().to(device, non_blocking=True) / 100
-        EEG = rearrange(EEG, 'B N (A T) -> B N A T', T=200)
+        EEG = ensure_patch_tensor(EEG, patch_size=200)
         target = target.to(device, non_blocking=True)
         if is_binary:
             target = target.float().unsqueeze(-1)
         
         # compute output
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
             output = model(EEG, input_chans=input_chans)
             loss = criterion(output, target)
         
@@ -186,16 +198,11 @@ def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=
         else:
             output = output.cpu()
         target = target.cpu()
-
-        results = utils.get_metrics(output.numpy(), target.numpy(), metrics, is_binary)
         pred.append(output)
         true.append(target)
 
         batch_size = EEG.shape[0]
         metric_logger.update(loss=loss.item())
-        for key, value in results.items():
-            metric_logger.meters[key].update(value, n=batch_size)
-        #metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print('* loss {losses.global_avg:.3f}'

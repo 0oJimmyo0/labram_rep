@@ -13,6 +13,7 @@ import datetime
 from pyexpat import model
 import numpy as np
 import time
+import warnings
 import torch
 import torch.backends.cudnn as cudnn
 import json
@@ -172,7 +173,9 @@ def get_args():
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
     parser.add_argument('--dataset', default='TUAB', type=str,
-                        help='dataset: TUAB | TUEV')
+                        help='dataset: TUAB | TUEV | SEED-V | FACED')
+    parser.add_argument('--data_path', default='',
+                        help='path to the preprocessed TUAB/TUEV dataset root')
 
     known_args, _ = parser.parse_known_args()
 
@@ -211,20 +214,57 @@ def get_models(args):
 
 
 def get_dataset(args):
-    if args.dataset == 'TUAB':
-        train_dataset, test_dataset, val_dataset = utils.prepare_TUAB_dataset("path/to/TUAB")
+    if not args.data_path:
+        raise ValueError("--data_path must point to the preprocessed dataset root")
+    dataset_name = str(args.dataset).upper().replace("_", "-")
+    if dataset_name == 'TUAB':
+        train_dataset, test_dataset, val_dataset = utils.prepare_TUAB_dataset(args.data_path)
         ch_names = ['EEG FP1', 'EEG FP2-REF', 'EEG F3-REF', 'EEG F4-REF', 'EEG C3-REF', 'EEG C4-REF', 'EEG P3-REF', 'EEG P4-REF', 'EEG O1-REF', 'EEG O2-REF', 'EEG F7-REF', \
                     'EEG F8-REF', 'EEG T3-REF', 'EEG T4-REF', 'EEG T5-REF', 'EEG T6-REF', 'EEG A1-REF', 'EEG A2-REF', 'EEG FZ-REF', 'EEG CZ-REF', 'EEG PZ-REF', 'EEG T1-REF', 'EEG T2-REF']
         ch_names = [name.split(' ')[-1].split('-')[0] for name in ch_names]
         args.nb_classes = 1
         metrics = ["pr_auc", "roc_auc", "accuracy", "balanced_accuracy"]
-    elif args.dataset == 'TUEV':
-        train_dataset, test_dataset, val_dataset = utils.prepare_TUEV_dataset("path/to/TUEV")
-        ch_names = ['EEG FP1-REF', 'EEG FP2-REF', 'EEG F3-REF', 'EEG F4-REF', 'EEG C3-REF', 'EEG C4-REF', 'EEG P3-REF', 'EEG P4-REF', 'EEG O1-REF', 'EEG O2-REF', 'EEG F7-REF', \
-                    'EEG F8-REF', 'EEG T3-REF', 'EEG T4-REF', 'EEG T5-REF', 'EEG T6-REF', 'EEG A1-REF', 'EEG A2-REF', 'EEG FZ-REF', 'EEG CZ-REF', 'EEG PZ-REF', 'EEG T1-REF', 'EEG T2-REF']
-        ch_names = [name.split(' ')[-1].split('-')[0] for name in ch_names]
+    elif dataset_name == 'TUEV':
+        train_dataset, test_dataset, val_dataset = utils.prepare_TUEV_dataset(args.data_path)
+        # Follow the existing ACCRE-preprocessed 16-channel bipolar montage, not the
+        # original hardcoded 23-channel TUEV assumption.
+        ch_names = list(utils.TUEV_BIPOLAR_16_CH)
         args.nb_classes = 6
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
+    elif dataset_name in {'SEED-V', 'SEEDV'}:
+        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(args.data_path)
+        ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
+        if ch_names is None:
+            # The current LMDB stores the correct tensor shape (62, 1, 200), but not an
+            # explicit channel-name manifest. We therefore preserve the stored tensor
+            # order as-is and let LaBraM consume exactly the observed 62 channel slots,
+            # rather than inventing a channel permutation or expanding to unused slots.
+            warnings.warn(
+                "SEED-V channel names are not encoded in the current LMDB/schema sidecars; "
+                "LaBraM will consume the stored 62-channel tensor order directly until "
+                "an explicit channel-order manifest is provided.",
+                RuntimeWarning,
+            )
+        else:
+            print(f"Loaded SEED-V channel manifest with {len(ch_names)} channels.")
+        args.nb_classes = 5
+        metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
+    elif dataset_name == 'FACED':
+        train_dataset, test_dataset, val_dataset = utils.prepare_FACED_dataset(args.data_path)
+        ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
+        if ch_names is None:
+            warnings.warn(
+                "FACED channel names are not encoded in the current LMDB/schema sidecars; "
+                "LaBraM will consume the stored 32-channel tensor order directly until "
+                "an explicit channel-order manifest is provided.",
+                RuntimeWarning,
+            )
+        else:
+            print(f"Loaded FACED channel manifest with {len(ch_names)} channels.")
+        args.nb_classes = 9
+        metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
+    else:
+        raise ValueError(f"Unsupported dataset '{args.dataset}'. Expected one of: TUAB, TUEV, SEED-V, FACED")
     return train_dataset, test_dataset, val_dataset, ch_names, metrics
 
 
@@ -255,32 +295,38 @@ def main(args, ds_init):
         dataset_val = None
         dataset_test = None
 
-    if True:  # args.distributed:
+    global_rank = utils.get_rank()
+
+    if args.distributed:
         num_tasks = utils.get_world_size()
-        global_rank = utils.get_rank()
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
         print("Sampler_train = %s" % str(sampler_train))
-        if args.dist_eval:
-            if len(dataset_val) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_val = torch.utils.data.DistributedSampler(
-                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
-            if type(dataset_test) == list:
-                sampler_test = [torch.utils.data.DistributedSampler(
-                    dataset, num_replicas=num_tasks, rank=global_rank, shuffle=False) for dataset in dataset_test]
+        if dataset_val is not None:
+            if args.dist_eval:
+                if len(dataset_val) % num_tasks != 0:
+                    print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+                          'This will slightly alter validation results as extra duplicate entries are added to achieve '
+                          'equal num of samples per-process.')
+                sampler_val = torch.utils.data.DistributedSampler(
+                    dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+                if type(dataset_test) == list:
+                    sampler_test = [torch.utils.data.DistributedSampler(
+                        dataset, num_replicas=num_tasks, rank=global_rank, shuffle=False) for dataset in dataset_test]
+                else:
+                    sampler_test = torch.utils.data.DistributedSampler(
+                        dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=False)
             else:
-                sampler_test = torch.utils.data.DistributedSampler(
-                    dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+                sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+                sampler_test = torch.utils.data.SequentialSampler(dataset_test)
         else:
-            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-            sampler_test = torch.utils.data.SequentialSampler(dataset_test)
+            sampler_val = None
+            sampler_test = None
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val) if dataset_val is not None else None
+        sampler_test = torch.utils.data.SequentialSampler(dataset_test) if dataset_test is not None else None
 
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -336,7 +382,9 @@ def main(args, ds_init):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.finetune, map_location='cpu', check_hash=True)
         else:
-            checkpoint = torch.load(args.finetune, map_location='cpu')
+            # LaBraM checkpoints contain NumPy scalars; newer PyTorch defaults to
+            # weights_only=True, which rejects those objects unless we opt out.
+            checkpoint = torch.load(args.finetune, map_location='cpu', weights_only=False)
 
         print("Load ckpt from %s" % args.finetune)
         checkpoint_model = None
@@ -349,13 +397,12 @@ def main(args, ds_init):
             checkpoint_model = checkpoint
         if (checkpoint_model is not None) and (args.model_filter_name != ''):
             all_keys = list(checkpoint_model.keys())
-            new_dict = OrderedDict()
-            for key in all_keys:
-                if key.startswith('student.'):
-                    new_dict[key[8:]] = checkpoint_model[key]
-                else:
-                    pass
-            checkpoint_model = new_dict
+            if any(key.startswith('student.') for key in all_keys):
+                new_dict = OrderedDict()
+                for key in all_keys:
+                    if key.startswith('student.'):
+                        new_dict[key[8:]] = checkpoint_model[key]
+                checkpoint_model = new_dict
 
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
@@ -390,6 +437,11 @@ def main(args, ds_init):
 
     total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
     num_training_steps_per_epoch = len(dataset_train) // total_batch_size
+    if num_training_steps_per_epoch == 0:
+        raise ValueError(
+            f"num_training_steps_per_epoch is 0: len(dataset_train)={len(dataset_train)}, "
+            f"total_batch_size={total_batch_size}. Reduce batch size / update_freq or use more data."
+        )
     print("LR = %.8f" % args.lr)
     print("Batch size = %d" % total_batch_size)
     print("Update frequent = %d" % args.update_freq)
@@ -458,9 +510,12 @@ def main(args, ds_init):
         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
             
     if args.eval:
+        if data_loader_test is None:
+            raise ValueError("Evaluation requested but no test dataloader is available.")
         balanced_accuracy = []
         accuracy = []
-        for data_loader in data_loader_test:
+        eval_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
+        for data_loader in eval_loaders:
             test_stats = evaluate(data_loader, model, device, header='Test:', ch_names=ch_names, metrics=metrics, is_binary=(args.nb_classes == 1))
             accuracy.append(test_stats['accuracy'])
             balanced_accuracy.append(test_stats['balanced_accuracy'])
@@ -471,6 +526,16 @@ def main(args, ds_init):
     start_time = time.time()
     max_accuracy = 0.0
     max_accuracy_test = 0.0
+
+    def _stat_value(stats, primary, fallback=None):
+        if primary in stats and stats[primary] is not None:
+            return float(stats[primary])
+        if fallback is not None and fallback in stats and stats[fallback] is not None:
+            return float(stats[fallback])
+        return float("nan")
+
+    selection_metric = "balanced_accuracy" if "balanced_accuracy" in metrics else "accuracy"
+
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -492,19 +557,43 @@ def main(args, ds_init):
             
         if data_loader_val is not None:
             val_stats = evaluate(data_loader_val, model, device, header='Val:', ch_names=ch_names, metrics=metrics, is_binary=args.nb_classes == 1)
-            print(f"Accuracy of the network on the {len(dataset_val)} val EEG: {val_stats['accuracy']:.2f}%")
             test_stats = evaluate(data_loader_test, model, device, header='Test:', ch_names=ch_names, metrics=metrics, is_binary=args.nb_classes == 1)
-            print(f"Accuracy of the network on the {len(dataset_test)} test EEG: {test_stats['accuracy']:.2f}%")
             
-            if max_accuracy < val_stats["accuracy"]:
-                max_accuracy = val_stats["accuracy"]
+            current_val_score = _stat_value(val_stats, selection_metric, "accuracy")
+            current_test_score = _stat_value(test_stats, selection_metric, "accuracy")
+
+            if max_accuracy < current_val_score:
+                max_accuracy = current_val_score
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch="best", model_ema=model_ema)
-                max_accuracy_test = test_stats["accuracy"]
+                max_accuracy_test = current_test_score
 
-            print(f'Max accuracy val: {max_accuracy:.2f}%, max accuracy test: {max_accuracy_test:.2f}%')
+            val_acc = _stat_value(val_stats, "balanced_accuracy", "accuracy")
+            val_kappa = _stat_value(val_stats, "cohen_kappa")
+            val_f1 = _stat_value(val_stats, "f1_weighted")
+            test_acc = _stat_value(test_stats, "balanced_accuracy", "accuracy")
+            test_kappa = _stat_value(test_stats, "cohen_kappa")
+            test_f1 = _stat_value(test_stats, "f1_weighted")
+
+            print(
+                "Epoch {} : Training Loss: {:.5f}, val acc: {:.5f}, val kappa: {:.5f}, val f1: {:.5f}, "
+                "test acc: {:.5f}, test kappa: {:.5f}, test f1: {:.5f}, best val acc: {:.5f}, "
+                "best test acc: {:.5f}, Time elapsed {:.2f} mins".format(
+                    epoch + 1,
+                    float(train_stats['loss']),
+                    val_acc,
+                    val_kappa,
+                    val_f1,
+                    test_acc,
+                    test_kappa,
+                    test_f1,
+                    float(max_accuracy),
+                    float(max_accuracy_test),
+                    (time.time() - start_time) / 60.0,
+                )
+            )
             if log_writer is not None:
                 for key, value in val_stats.items():
                     if key == 'accuracy':

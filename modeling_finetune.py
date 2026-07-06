@@ -346,6 +346,17 @@ class NeuralTransformer(nn.Module):
         self.num_classes = num_classes
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
+    def _select_pos_embed(self, input_chans, num_channels):
+        if self.pos_embed is None:
+            return None
+        if input_chans is not None:
+            return self.pos_embed[:, input_chans]
+        # Some downstream datasets in this repo preserve the tensor channel order
+        # but do not persist a channel-name manifest. In that case, align the
+        # positional slots to the stored tensor shape instead of expanding to all
+        # 128 available channel slots.
+        return self.pos_embed[:, :num_channels + 1]
+
     def forward_features(self, x, input_chans=None, return_patch_tokens=False, return_all_tokens=False, **kwargs):
         batch_size, n, a, t = x.shape
         input_time_window = a if t == self.patch_size else t
@@ -355,7 +366,7 @@ class NeuralTransformer(nn.Module):
 
         x = torch.cat((cls_tokens, x), dim=1)
 
-        pos_embed_used = self.pos_embed[:, input_chans] if input_chans is not None else self.pos_embed
+        pos_embed_used = self._select_pos_embed(input_chans, n)
         if self.pos_embed is not None:
             pos_embed = pos_embed_used[:, 1:, :].unsqueeze(2).expand(batch_size, -1, input_time_window, -1).flatten(1, 2)
             pos_embed = torch.cat((pos_embed_used[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
@@ -397,17 +408,19 @@ class NeuralTransformer(nn.Module):
         return x
 
     def forward_intermediate(self, x, layer_id=12, norm_output=False):
+        batch_size, n, a, t = x.shape
+        input_time_window = a if t == self.patch_size else t
         x = self.patch_embed(x)
-        batch_size, seq_len, _ = x.size()
 
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
         if self.pos_embed is not None:
-            pos_embed = self.pos_embed[:, 1:, :].unsqueeze(2).expand(batch_size, -1, self.time_window, -1).flatten(1, 2)
-            pos_embed = torch.cat((self.pos_embed[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
+            pos_embed_used = self._select_pos_embed(None, n)
+            pos_embed = pos_embed_used[:, 1:, :].unsqueeze(2).expand(batch_size, -1, input_time_window, -1).flatten(1, 2)
+            pos_embed = torch.cat((pos_embed_used[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
             x = x + pos_embed
         if self.time_embed is not None:
-            time_embed = self.time_embed.unsqueeze(1).expand(batch_size, 62, -1, -1).flatten(1, 2)
+            time_embed = self.time_embed[:, 0:input_time_window, :].unsqueeze(1).expand(batch_size, n, -1, -1).flatten(1, 2)
             x[:, 1:, :] += time_embed
         x = self.pos_drop(x)
 
@@ -437,17 +450,19 @@ class NeuralTransformer(nn.Module):
             raise NotImplementedError(f"Not support for layer id is {layer_id} now!")
     
     def get_intermediate_layers(self, x, use_last_norm=False):
+        batch_size, n, a, t = x.shape
+        input_time_window = a if t == self.patch_size else t
         x = self.patch_embed(x)
-        batch_size, seq_len, _ = x.size()
 
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
         if self.pos_embed is not None:
-            pos_embed = self.pos_embed[:, 1:, :].unsqueeze(2).expand(batch_size, -1, self.time_window, -1).flatten(1, 2)
-            pos_embed = torch.cat((self.pos_embed[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
+            pos_embed_used = self._select_pos_embed(None, n)
+            pos_embed = pos_embed_used[:, 1:, :].unsqueeze(2).expand(batch_size, -1, input_time_window, -1).flatten(1, 2)
+            pos_embed = torch.cat((pos_embed_used[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
             x = x + pos_embed
         if self.time_embed is not None:
-            time_embed = self.time_embed.unsqueeze(1).expand(batch_size, 62, -1, -1).flatten(1, 2)
+            time_embed = self.time_embed[:, 0:input_time_window, :].unsqueeze(1).expand(batch_size, n, -1, -1).flatten(1, 2)
             x[:, 1:, :] += time_embed
         x = self.pos_drop(x)
 

@@ -15,6 +15,7 @@ import math
 import time
 import json
 import glob
+import warnings
 from collections import defaultdict, deque
 import datetime
 import numpy as np
@@ -22,6 +23,7 @@ from timm.utils import get_state_dict
 
 from pathlib import Path
 import argparse
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -32,8 +34,15 @@ from tensorboardX import SummaryWriter
 from data_processor.dataset import ShockDataset
 import pickle
 from scipy.signal import resample
-from pyhealth.metrics import binary_metrics_fn, multiclass_metrics_fn
 import pandas as pd
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    cohen_kappa_score,
+    f1_score,
+    average_precision_score,
+    roc_auc_score,
+)
 from sklearn.metrics import r2_score
 from sklearn.metrics import mean_squared_error
 from scipy.stats import pearsonr
@@ -54,6 +63,13 @@ standard_1020 = [
     'CCP1', 'CCP2', 'CCP3', 'CCP4', 'CCP5', 'CCP6', 'CCP7', 'CCP8', \
     'T1', 'T2', 'FTT9h', 'TTP7h', 'TPP9h', 'FTT10h', 'TPP8h', 'TPP10h', \
     "FP1-F7", "F7-T7", "T7-P7", "P7-O1", "FP2-F8", "F8-T8", "T8-P8", "P8-O2", "FP1-F3", "F3-C3", "C3-P3", "P3-O1", "FP2-F4", "F4-C4", "C4-P4", "P4-O2"
+]
+
+TUEV_BIPOLAR_16_CH = [
+    "FP1-F7", "F7-T7", "T7-P7", "P7-O1",
+    "FP2-F8", "F8-T8", "T8-P8", "P8-O2",
+    "FP1-F3", "F3-C3", "C3-P3", "P3-O1",
+    "FP2-F4", "F4-C4", "C4-P4", "P4-O2",
 ]
 
 
@@ -101,7 +117,7 @@ class SmoothedValue(object):
         """
         if not is_dist_avail_and_initialized():
             return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
+        t = torch.tensor([self.count, self.total], dtype=torch.float64, device=_distributed_device())
         dist.barrier()
         dist.all_reduce(t)
         t = t.tolist()
@@ -431,7 +447,7 @@ def init_distributed_mode(args):
         args.rank, args.dist_url, args.gpu), flush=True)
     torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                          world_size=args.world_size, rank=args.rank)
-    torch.distributed.barrier()
+    torch.distributed.barrier(device_ids=[args.gpu])
     setup_for_distributed(args.rank == 0)
 
 
@@ -499,7 +515,7 @@ class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
 
     def __init__(self):
-        self._scaler = torch.cuda.amp.GradScaler()
+        self._scaler = torch.amp.GradScaler("cuda")
 
     def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True, layer_names=None):
         self._scaler.scale(loss).backward(create_graph=create_graph)
@@ -555,20 +571,22 @@ def get_grad_norm_(parameters, norm_type: float = 2.0, layer_names=None) -> torc
 def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0,
                      start_warmup_value=0, warmup_steps=-1):
     warmup_schedule = np.array([])
+    total_iters = epochs * niter_per_ep
     warmup_iters = warmup_epochs * niter_per_ep
     if warmup_steps > 0:
         warmup_iters = warmup_steps
+    warmup_iters = min(warmup_iters, total_iters)
     print("Set warmup steps = %d" % warmup_iters)
-    if warmup_epochs > 0:
+    if warmup_iters > 0:
         warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
 
-    iters = np.arange(epochs * niter_per_ep - warmup_iters)
+    iters = np.arange(total_iters - warmup_iters)
     schedule = np.array(
         [final_value + 0.5 * (base_value - final_value) * (1 + math.cos(math.pi * i / (len(iters)))) for i in iters])
 
     schedule = np.concatenate((warmup_schedule, schedule))
 
-    assert len(schedule) == epochs * niter_per_ep
+    assert len(schedule) == total_iters
     return schedule
 
 
@@ -632,7 +650,7 @@ def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, mode
                 checkpoint = torch.hub.load_state_dict_from_url(
                     args.resume, map_location='cpu', check_hash=True)
             else:
-                checkpoint = torch.load(args.resume, map_location='cpu')
+                checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
             model_without_ddp.load_state_dict(checkpoint['model']) # strict: bool=True, , strict=False
             print("Resume checkpoint %s" % args.resume)
             if 'optimizer' in checkpoint and 'epoch' in checkpoint:
@@ -717,6 +735,12 @@ def get_input_chans(ch_names):
     return input_chans
 
 
+def _distributed_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda", torch.cuda.current_device())
+    return torch.device("cpu")
+
+
 class TUABLoader(torch.utils.data.Dataset):
     def __init__(self, root, files, sampling_rate=200):
         self.root = root
@@ -752,6 +776,9 @@ class TUEVLoader(torch.utils.data.Dataset):
         X = sample["signal"]
         if self.sampling_rate != self.default_rate:
             X = resample(X, 5 * self.sampling_rate, axis=-1)
+        if X.shape[-1] % 200 != 0:
+            raise ValueError(f"TUEV sample length must be divisible by 200, got shape={X.shape}")
+        X = X.reshape(X.shape[0], -1, 200)
         Y = int(sample["label"][0] - 1)
         X = torch.FloatTensor(X)
         return X, Y
@@ -783,6 +810,321 @@ def prepare_TUEV_dataset(root):
     return train_dataset, test_dataset, val_dataset
 
 
+class SEEDVLoader(torch.utils.data.Dataset):
+    def __init__(self, root, mode="train"):
+        self.root = root
+        self.mode = mode
+        self.channel_names = read_seedv_channel_names(root)
+        try:
+            import lmdb  # local import so non-LMDB datasets do not require it
+        except ImportError as exc:
+            raise ImportError("SEED-V loading requires the 'lmdb' package in the active environment") from exc
+        self._lmdb = lmdb
+        self.db = None
+        # Read split metadata once in the parent process, then reopen LMDB lazily per
+        # worker. Sharing an inherited LMDB handle across DataLoader worker processes
+        # can trigger intermittent segfaults on cluster filesystems.
+        with lmdb.open(root, readonly=True, lock=False, readahead=False, meminit=False).begin(write=False) as txn:
+            raw_keys = txn.get(b"__keys__")
+        if raw_keys is None:
+            raise KeyError(f"SEED-V LMDB missing '__keys__' in {root}")
+        split_index = pickle.loads(raw_keys)
+        if mode not in split_index:
+            raise KeyError(f"SEED-V LMDB missing split {mode!r}; available: {list(split_index.keys())}")
+        self.keys = split_index[mode]
+
+    def __len__(self):
+        return len(self.keys)
+
+    def get_ch_names(self):
+        return self.channel_names
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["db"] = None
+        return state
+
+    def _get_db(self):
+        if self.db is None:
+            self.db = self._lmdb.open(
+                self.root,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+                max_readers=512,
+            )
+        return self.db
+
+    def __getitem__(self, index):
+        key = self.keys[index]
+        enc_key = key.encode() if isinstance(key, str) else key
+        with self._get_db().begin(write=False) as txn:
+            raw = txn.get(enc_key)
+        if raw is None:
+            raise KeyError(f"SEED-V LMDB key not found: {key!r}")
+        sample = pickle.loads(raw)
+        X = sample["sample"]
+        if X.ndim != 3:
+            raise ValueError(f"Expected SEED-V sample with shape (channels, patches, 200), got {X.shape}")
+        Y = int(sample["label"])
+        X = torch.FloatTensor(X)
+        return X, Y
+
+
+def prepare_SEEDV_dataset(root):
+    train_dataset = SEEDVLoader(root, mode="train")
+    val_dataset = SEEDVLoader(root, mode="val")
+    test_dataset = SEEDVLoader(root, mode="test")
+    print(len(train_dataset), len(val_dataset), len(test_dataset))
+    return train_dataset, test_dataset, val_dataset
+
+
+class FACEDLoader(torch.utils.data.Dataset):
+    def __init__(self, root, mode="train"):
+        self.root = root
+        self.mode = mode
+        try:
+            import lmdb  # local import so non-LMDB datasets do not require it
+        except ImportError as exc:
+            raise ImportError("FACED loading requires the 'lmdb' package in the active environment") from exc
+        self._lmdb = lmdb
+        self.db = None
+        with lmdb.open(root, readonly=True, lock=False, readahead=False, meminit=False).begin(write=False) as txn:
+            raw_keys = txn.get(b"__keys__")
+        if raw_keys is None:
+            raise KeyError(f"FACED LMDB missing '__keys__' in {root}")
+        split_index = pickle.loads(raw_keys)
+        if mode not in split_index:
+            raise KeyError(f"FACED LMDB missing split {mode!r}; available: {list(split_index.keys())}")
+        self.keys = split_index[mode]
+        self.channel_names = read_faced_channel_names(root)
+
+    def __len__(self):
+        return len(self.keys)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["db"] = None
+        return state
+
+    def _get_db(self):
+        if self.db is None:
+            self.db = self._lmdb.open(
+                self.root,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+                max_readers=512,
+            )
+        return self.db
+
+    def __getitem__(self, index):
+        key = self.keys[index]
+        enc_key = key.encode() if isinstance(key, str) else key
+        with self._get_db().begin(write=False) as txn:
+            raw = txn.get(enc_key)
+        if raw is None:
+            raise KeyError(f"FACED LMDB key not found: {key!r}")
+        sample = pickle.loads(raw)
+        X = sample["sample"]
+        if X.ndim != 3:
+            raise ValueError(f"Expected FACED sample with shape (channels, patches, 200), got {X.shape}")
+        Y = int(sample["label"])
+        X = torch.FloatTensor(X)
+        return X, Y
+
+    def get_ch_names(self):
+        return self.channel_names
+
+
+def prepare_FACED_dataset(root):
+    train_dataset = FACEDLoader(root, mode="train")
+    val_dataset = FACEDLoader(root, mode="val")
+    test_dataset = FACEDLoader(root, mode="test")
+    print(len(train_dataset), len(val_dataset), len(test_dataset))
+    return train_dataset, test_dataset, val_dataset
+
+
+def _normalize_labram_channel_name(ch_name: str) -> str:
+    key = str(ch_name).strip().upper()
+    alias_map = {
+        "A1": "TP9",
+        "A2": "TP10",
+        "M1": "TP9",
+        "M2": "TP10",
+        "LEFT_MASTOID": "TP9",
+        "RIGHT_MASTOID": "TP10",
+    }
+    return alias_map.get(key, key)
+
+
+def _validate_channel_names(channel_names, root, dataset_name: str, expected_count: int):
+    if channel_names is None:
+        return None
+    if not isinstance(channel_names, (list, tuple)):
+        warnings.warn(f"{dataset_name} channel manifest at {root} is not a list/tuple; ignoring it.")
+        return None
+    normalized = [_normalize_labram_channel_name(ch) for ch in channel_names if str(ch).strip()]
+    if len(normalized) != expected_count:
+        warnings.warn(
+            f"{dataset_name} channel manifest for {root} has {len(normalized)} channels instead of {expected_count}; ignoring it."
+        )
+        return None
+    missing = [ch for ch in normalized if ch not in standard_1020]
+    if missing:
+        warnings.warn(
+            f"{dataset_name} channel manifest for {root} contains channels not present in LaBraM standard_1020: {missing[:8]}; ignoring it."
+        )
+        return None
+    return normalized
+
+
+def _validate_seedv_channel_names(channel_names, root):
+    return _validate_channel_names(channel_names, root, "SEED-V", 62)
+
+
+def _extract_channel_names_payload(payload):
+    if isinstance(payload, dict):
+        if "labram_channel_names" in payload:
+            return payload["labram_channel_names"]
+        for field in ("channel_names", "ch_names", "channels", "stored_channel_names"):
+            if field in payload:
+                return payload[field]
+    elif isinstance(payload, (list, tuple)):
+        return payload
+    return None
+
+
+def read_seedv_channel_names(root) -> Optional[list]:
+    candidate_keys = [
+        b"__channel_names__",
+        b"channel_names",
+        b"ch_names",
+        b"channels",
+    ]
+    candidate_files = [
+        root + "_channel_names.json",
+        root + "_channel_names.pkl",
+        root + "_metadata.json",
+        root + "_meta.json",
+        os.path.join(root, "channel_names.json"),
+        os.path.join(root, "channel_names.pkl"),
+    ]
+
+    try:
+        import lmdb
+    except ImportError:
+        lmdb = None
+
+    if lmdb is not None:
+        try:
+            db = lmdb.open(root, readonly=True, lock=False, readahead=True, meminit=False)
+            with db.begin(write=False) as txn:
+                for key in candidate_keys:
+                    raw = txn.get(key)
+                    if raw is None:
+                        continue
+                    try:
+                        channel_names = pickle.loads(raw)
+                    except Exception:
+                        try:
+                            channel_names = json.loads(raw.decode("utf-8"))
+                        except Exception:
+                            channel_names = None
+                    channel_names = _validate_seedv_channel_names(_extract_channel_names_payload(channel_names), root)
+                    if channel_names is not None:
+                        return channel_names
+        except Exception:
+            pass
+
+    for path in candidate_files:
+        if not os.path.isfile(path):
+            continue
+        try:
+            if path.endswith(".json"):
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            else:
+                with open(path, "rb") as f:
+                    payload = pickle.load(f)
+        except Exception:
+            continue
+
+        channel_names = _extract_channel_names_payload(payload)
+
+        channel_names = _validate_seedv_channel_names(channel_names, root)
+        if channel_names is not None:
+            return channel_names
+
+    return None
+
+
+def _validate_faced_channel_names(channel_names, root):
+    return _validate_channel_names(channel_names, root, "FACED", 32)
+
+
+def read_faced_channel_names(root) -> Optional[list]:
+    candidate_keys = [
+        b"__channel_manifest__",
+        b"__channel_names__",
+        b"channel_names",
+        b"ch_names",
+        b"channels",
+    ]
+    candidate_files = [
+        root + "_channel_manifest.json",
+        root + "_channel_names.json",
+        os.path.join(root, "channel_manifest.json"),
+        os.path.join(root, "channel_names.json"),
+    ]
+
+    try:
+        import lmdb
+    except ImportError:
+        lmdb = None
+
+    if lmdb is not None:
+        try:
+            db = lmdb.open(root, readonly=True, lock=False, readahead=True, meminit=False)
+            with db.begin(write=False) as txn:
+                for key in candidate_keys:
+                    raw = txn.get(key)
+                    if raw is None:
+                        continue
+                    try:
+                        payload = pickle.loads(raw)
+                    except Exception:
+                        try:
+                            payload = json.loads(raw.decode("utf-8"))
+                        except Exception:
+                            payload = None
+                    channel_names = _validate_faced_channel_names(_extract_channel_names_payload(payload), root)
+                    if channel_names is not None:
+                        return channel_names
+        except Exception:
+            pass
+
+    for path in candidate_files:
+        if not os.path.isfile(path):
+            continue
+        try:
+            if path.endswith(".json"):
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            else:
+                with open(path, "rb") as f:
+                    payload = pickle.load(f)
+        except Exception:
+            continue
+        channel_names = _validate_faced_channel_names(_extract_channel_names_payload(payload), root)
+        if channel_names is not None:
+            return channel_names
+
+    return None
+
+
 def prepare_TUAB_dataset(root):
     # set random seed
     seed = 12345
@@ -805,22 +1147,35 @@ def prepare_TUAB_dataset(root):
 
 def get_metrics(output, target, metrics, is_binary, threshold=0.5):
     if is_binary:
-        if 'roc_auc' not in metrics or sum(target) * (len(target) - sum(target)) != 0:  # to prevent all 0 or all 1 and raise the AUROC error
-            results = binary_metrics_fn(
-                target,
-                output,
-                metrics=metrics,
-                threshold=threshold,
-            )
-        else:
-            results = {
-                "accuracy": 0.0,
-                "balanced_accuracy": 0.0,
-                "pr_auc": 0.0,
-                "roc_auc": 0.0,
-            }
+        y_true = np.asarray(target).reshape(-1)
+        y_score = np.asarray(output).reshape(-1)
+        y_pred = (y_score >= threshold).astype(int)
+        results = {}
+        for metric in metrics:
+            if metric == "accuracy":
+                results[metric] = accuracy_score(y_true, y_pred)
+            elif metric == "balanced_accuracy":
+                results[metric] = balanced_accuracy_score(y_true, y_pred)
+            elif metric == "pr_auc":
+                # average_precision_score is the standard PR-AUC summary statistic.
+                results[metric] = average_precision_score(y_true, y_score)
+            elif metric == "roc_auc":
+                if len(np.unique(y_true)) < 2:
+                    results[metric] = 0.0
+                else:
+                    results[metric] = roc_auc_score(y_true, y_score)
     else:
-        results = multiclass_metrics_fn(
-            target, output, metrics=metrics
-        )
+        y_true = np.asarray(target).reshape(-1)
+        y_score = np.asarray(output)
+        y_pred = np.argmax(y_score, axis=-1)
+        results = {}
+        for metric in metrics:
+            if metric == "accuracy":
+                results[metric] = accuracy_score(y_true, y_pred)
+            elif metric == "balanced_accuracy":
+                results[metric] = balanced_accuracy_score(y_true, y_pred)
+            elif metric == "cohen_kappa":
+                results[metric] = cohen_kappa_score(y_true, y_pred)
+            elif metric == "f1_weighted":
+                results[metric] = f1_score(y_true, y_pred, average="weighted")
     return results
