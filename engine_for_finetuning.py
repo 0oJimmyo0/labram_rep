@@ -120,6 +120,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     model_ema.update(model)
             loss_scale_value = loss_scaler.state_dict()["scale"]
 
+        adapter_diagnostics = {}
+        core_model = model.module if hasattr(model, 'module') else model
+        if hasattr(core_model, 'get_adapter_diagnostics'):
+            # Capture gradients before optimizer.zero_grad() clears them.
+            adapter_diagnostics = core_model.get_adapter_diagnostics()
+
         torch.cuda.synchronize()
 
         if is_binary:
@@ -145,11 +151,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(weight_decay=weight_decay_value)
         metric_logger.update(grad_norm=grad_norm)
 
-        core_model = model.module if hasattr(model, 'module') else model
-        if hasattr(core_model, 'get_adapter_diagnostics'):
-            adapter_diagnostics = core_model.get_adapter_diagnostics()
-            for name, value in adapter_diagnostics.items():
-                metric_logger.update(**{name: value})
+        for name, value in adapter_diagnostics.items():
+            metric_logger.update(**{name: value})
 
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
@@ -159,7 +162,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.update(min_lr=min_lr, head="opt")
             log_writer.update(weight_decay=weight_decay_value, head="opt")
             log_writer.update(grad_norm=grad_norm, head="opt")
-            for name, value in adapter_diagnostics.items() if 'adapter_diagnostics' in locals() else []:
+            for name, value in adapter_diagnostics.items():
                 log_writer.update(**{name: value}, head="adapter")
 
             log_writer.set_step()
