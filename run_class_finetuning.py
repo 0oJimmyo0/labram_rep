@@ -10,6 +10,8 @@
 
 import argparse
 import datetime
+import hashlib
+import random
 from pyexpat import model
 import numpy as np
 import time
@@ -166,6 +168,8 @@ def get_args():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--deterministic', action='store_true', default=False,
+                        help='Enable deterministic CUDA/cuDNN algorithms for reproducibility checks.')
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint')
     parser.add_argument('--auto_resume', action='store_true')
@@ -249,6 +253,19 @@ def get_models(args):
     return model
 
 
+def shared_parameter_checksum(model):
+    """Hash common model state, excluding adapter-only parameters."""
+    digest = hashlib.sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        if name.startswith('native_axis_adapter.'):
+            continue
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode('utf-8'))
+        digest.update(str(value.dtype).encode('ascii'))
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
+
+
 def get_dataset(args):
     if not args.data_path:
         raise ValueError("--data_path must point to the preprocessed dataset root")
@@ -317,11 +334,15 @@ def main(args, ds_init):
 
     # fix the seed for reproducibility
     seed = args.seed + utils.get_rank()
+    random.seed(seed)
     torch.manual_seed(seed)
     np.random.seed(seed)
-    # random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-    cudnn.benchmark = True
+    cudnn.benchmark = not args.deterministic
+    cudnn.deterministic = args.deterministic
+    torch.use_deterministic_algorithms(args.deterministic)
 
     # dataset_train, dataset_test, dataset_val: follows the standard format of torch.utils.data.Dataset.
     # ch_names: list of strings, channel names of the dataset. It should be in capital letters.
@@ -562,7 +583,6 @@ def main(args, ds_init):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
-    max_accuracy_test = 0.0
 
     def _stat_value(stats, primary, fallback=None):
         if primary in stats and stats[primary] is not None:
@@ -587,17 +607,9 @@ def main(args, ds_init):
             ch_names=ch_names, is_binary=args.nb_classes == 1
         )
         
-        if args.output_dir and args.save_ckpt:
-            utils.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema, save_ckpt_freq=args.save_ckpt_freq)
-            
         if data_loader_val is not None:
             val_stats = evaluate(data_loader_val, model, device, header='Val:', ch_names=ch_names, metrics=metrics, is_binary=args.nb_classes == 1)
-            test_stats = evaluate(data_loader_test, model, device, header='Test:', ch_names=ch_names, metrics=metrics, is_binary=args.nb_classes == 1)
-            
             current_val_score = _stat_value(val_stats, selection_metric, "accuracy")
-            current_test_score = _stat_value(test_stats, selection_metric, "accuracy")
 
             if max_accuracy < current_val_score:
                 max_accuracy = current_val_score
@@ -605,29 +617,26 @@ def main(args, ds_init):
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch="best", model_ema=model_ema)
-                max_accuracy_test = current_test_score
+
+            if args.output_dir and args.save_ckpt:
+                utils.save_model(
+                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                    loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema,
+                    save_ckpt_freq=args.save_ckpt_freq)
 
             val_acc = _stat_value(val_stats, "balanced_accuracy", "accuracy")
             val_kappa = _stat_value(val_stats, "cohen_kappa")
             val_f1 = _stat_value(val_stats, "f1_weighted")
-            test_acc = _stat_value(test_stats, "balanced_accuracy", "accuracy")
-            test_kappa = _stat_value(test_stats, "cohen_kappa")
-            test_f1 = _stat_value(test_stats, "f1_weighted")
 
             print(
                 "Epoch {} : Training Loss: {:.5f}, val acc: {:.5f}, val kappa: {:.5f}, val f1: {:.5f}, "
-                "test acc: {:.5f}, test kappa: {:.5f}, test f1: {:.5f}, best val acc: {:.5f}, "
-                "best test acc: {:.5f}, Time elapsed {:.2f} mins".format(
+                "best val acc: {:.5f}, Time elapsed {:.2f} mins".format(
                     epoch + 1,
                     float(train_stats['loss']),
                     val_acc,
                     val_kappa,
                     val_f1,
-                    test_acc,
-                    test_kappa,
-                    test_f1,
                     float(max_accuracy),
-                    float(max_accuracy_test),
                     (time.time() - start_time) / 60.0,
                 )
             )
@@ -647,37 +656,61 @@ def main(args, ds_init):
                         log_writer.update(cohen_kappa=value, head="val", step=epoch)
                     elif key == 'loss':
                         log_writer.update(loss=value, head="val", step=epoch)
-                for key, value in test_stats.items():
-                    if key == 'accuracy':
-                        log_writer.update(accuracy=value, head="test", step=epoch)
-                    elif key == 'balanced_accuracy':
-                        log_writer.update(balanced_accuracy=value, head="test", step=epoch)
-                    elif key == 'f1_weighted':
-                        log_writer.update(f1_weighted=value, head="test", step=epoch)
-                    elif key == 'pr_auc':
-                        log_writer.update(pr_auc=value, head="test", step=epoch)
-                    elif key == 'roc_auc':
-                        log_writer.update(roc_auc=value, head="test", step=epoch)
-                    elif key == 'cohen_kappa':
-                        log_writer.update(cohen_kappa=value, head="test", step=epoch)
-                    elif key == 'loss':
-                        log_writer.update(loss=value, head="test", step=epoch)
-                
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                          **{f'val_{k}': v for k, v in val_stats.items()},
-                         **{f'test_{k}': v for k, v in test_stats.items()},
                          'epoch': epoch,
                          'n_parameters': n_parameters}
         else:
+            if args.output_dir and args.save_ckpt:
+                utils.save_model(
+                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                    loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema,
+                    save_ckpt_freq=args.save_ckpt_freq)
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                          'epoch': epoch,
                          'n_parameters': n_parameters}
+
+        if args.deterministic:
+            log_stats['shared_parameter_checksum'] = shared_parameter_checksum(model_without_ddp)
 
         if args.output_dir and utils.is_main_process():
             if log_writer is not None:
                 log_writer.flush()
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
+
+    # Test is evaluated only after model selection is complete. The saved best
+    # checkpoint is selected exclusively by validation balanced accuracy.
+    if data_loader_test is not None and data_loader_val is not None:
+        best_checkpoint = os.path.join(args.output_dir, "checkpoint-best.pth")
+        if not os.path.isfile(best_checkpoint):
+            raise FileNotFoundError(
+                f"Validation-selected checkpoint not found: {best_checkpoint}"
+            )
+        checkpoint = torch.load(best_checkpoint, map_location="cpu", weights_only=False)
+        model_without_ddp.load_state_dict(checkpoint["model"])
+        eval_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
+        test_stats_list = [
+            evaluate(loader, model, device, header="Final test:", ch_names=ch_names,
+                     metrics=metrics, is_binary=args.nb_classes == 1)
+            for loader in eval_loaders
+        ]
+        test_stats = {
+            key: float(np.mean([stats[key] for stats in test_stats_list if key in stats]))
+            for key in test_stats_list[0]
+        }
+        print(
+            "Final test from checkpoint-best: accuracy={:.5f}, balanced_accuracy={:.5f}, "
+            "cohen_kappa={:.5f}, f1_weighted={:.5f}".format(
+                _stat_value(test_stats, "accuracy"),
+                _stat_value(test_stats, "balanced_accuracy", "accuracy"),
+                _stat_value(test_stats, "cohen_kappa"),
+                _stat_value(test_stats, "f1_weighted"),
+            )
+        )
+        if args.output_dir and utils.is_main_process():
+            with open(os.path.join(args.output_dir, "final_test.json"), "w", encoding="utf-8") as f:
+                json.dump({f"test_{key}": value for key, value in test_stats.items()}, f, indent=2)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
