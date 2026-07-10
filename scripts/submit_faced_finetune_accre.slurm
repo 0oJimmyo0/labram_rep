@@ -14,7 +14,7 @@ set -euo pipefail
 REPO_DIR="/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM"
 ENV_DIR="/data/neurogroup/mingyangjiang/venvs/labram-accre"
 DATA_DIR="${DATA_DIR:-/data/neurogroup/mingyangjiang/data/FACED}"
-SEED="${SEED:-0}"
+SEED="${SEED:-1024}"
 DETERMINISTIC="${DETERMINISTIC:-0}"
 LABRAM_ADAPTER_TYPE="${LABRAM_ADAPTER_TYPE:-none}"
 RUN_ID="${RUN_ID:-faced_labram_${LABRAM_ADAPTER_TYPE}_seed${SEED}}"

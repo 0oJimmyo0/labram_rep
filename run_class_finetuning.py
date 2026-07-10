@@ -167,7 +167,7 @@ def get_args():
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--seed', default=1024, type=int)
     parser.add_argument('--deterministic', action='store_true', default=False,
                         help='Enable deterministic CUDA/cuDNN algorithms for reproducibility checks.')
     parser.add_argument('--resume', default='',
@@ -582,7 +582,8 @@ def main(args, ds_init):
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    max_accuracy = 0.0
+    max_primary_score = float('-inf')
+    max_val_ba = float('-inf')
 
     def _stat_value(stats, primary, fallback=None):
         if primary in stats and stats[primary] is not None:
@@ -591,7 +592,8 @@ def main(args, ds_init):
             return float(stats[fallback])
         return float("nan")
 
-    selection_metric = "balanced_accuracy" if "balanced_accuracy" in metrics else "accuracy"
+    selection_metric = "cohen_kappa" if "cohen_kappa" in metrics else "accuracy"
+    sensitivity_metric = "balanced_accuracy" if "balanced_accuracy" in metrics else "accuracy"
 
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
@@ -610,13 +612,21 @@ def main(args, ds_init):
         if data_loader_val is not None:
             val_stats = evaluate(data_loader_val, model, device, header='Val:', ch_names=ch_names, metrics=metrics, is_binary=args.nb_classes == 1)
             current_val_score = _stat_value(val_stats, selection_metric, "accuracy")
+            current_val_ba = _stat_value(val_stats, sensitivity_metric, "accuracy")
 
-            if max_accuracy < current_val_score:
-                max_accuracy = current_val_score
+            if max_primary_score < current_val_score:
+                max_primary_score = current_val_score
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch="best", model_ema=model_ema)
+
+            if max_val_ba < current_val_ba:
+                max_val_ba = current_val_ba
+                if args.output_dir and args.save_ckpt:
+                    utils.save_model(
+                        args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                        loss_scaler=loss_scaler, epoch="best-ba", model_ema=model_ema)
 
             if args.output_dir and args.save_ckpt:
                 utils.save_model(
@@ -630,13 +640,14 @@ def main(args, ds_init):
 
             print(
                 "Epoch {} : Training Loss: {:.5f}, val acc: {:.5f}, val kappa: {:.5f}, val f1: {:.5f}, "
-                "best val acc: {:.5f}, Time elapsed {:.2f} mins".format(
+                "best val kappa: {:.5f}, best val BA: {:.5f}, Time elapsed {:.2f} mins".format(
                     epoch + 1,
                     float(train_stats['loss']),
                     val_acc,
                     val_kappa,
                     val_f1,
-                    float(max_accuracy),
+                    float(max_primary_score),
+                    float(max_val_ba),
                     (time.time() - start_time) / 60.0,
                 )
             )
@@ -658,6 +669,10 @@ def main(args, ds_init):
                         log_writer.update(loss=value, head="val", step=epoch)
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                          **{f'val_{k}': v for k, v in val_stats.items()},
+                         'selection_metric': selection_metric,
+                         'val_selection_score': current_val_score,
+                         'best_val_selection_score': max_primary_score,
+                         'best_val_balanced_accuracy': max_val_ba,
                          'epoch': epoch,
                          'n_parameters': n_parameters}
         else:
@@ -679,38 +694,47 @@ def main(args, ds_init):
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
-    # Test is evaluated only after model selection is complete. The saved best
-    # checkpoint is selected exclusively by validation balanced accuracy.
+    # Test is evaluated only after model selection is complete. The primary
+    # checkpoint is selected by validation kappa; validation BA is retained as
+    # a sensitivity checkpoint without using test results for selection.
     if data_loader_test is not None and data_loader_val is not None:
-        best_checkpoint = os.path.join(args.output_dir, "checkpoint-best.pth")
-        if not os.path.isfile(best_checkpoint):
-            raise FileNotFoundError(
-                f"Validation-selected checkpoint not found: {best_checkpoint}"
-            )
-        checkpoint = torch.load(best_checkpoint, map_location="cpu", weights_only=False)
-        model_without_ddp.load_state_dict(checkpoint["model"])
         eval_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
-        test_stats_list = [
-            evaluate(loader, model, device, header="Final test:", ch_names=ch_names,
-                     metrics=metrics, is_binary=args.nb_classes == 1)
-            for loader in eval_loaders
-        ]
-        test_stats = {
-            key: float(np.mean([stats[key] for stats in test_stats_list if key in stats]))
-            for key in test_stats_list[0]
-        }
-        print(
-            "Final test from checkpoint-best: accuracy={:.5f}, balanced_accuracy={:.5f}, "
-            "cohen_kappa={:.5f}, f1_weighted={:.5f}".format(
-                _stat_value(test_stats, "accuracy"),
-                _stat_value(test_stats, "balanced_accuracy", "accuracy"),
-                _stat_value(test_stats, "cohen_kappa"),
-                _stat_value(test_stats, "f1_weighted"),
+        def _evaluate_selected_checkpoint(filename, label):
+            checkpoint_path = os.path.join(args.output_dir, filename)
+            if not os.path.isfile(checkpoint_path):
+                raise FileNotFoundError(f"Selected checkpoint not found: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            model_without_ddp.load_state_dict(checkpoint["model"])
+            stats_list = [
+                evaluate(loader, model, device, header=f"{label} test:", ch_names=ch_names,
+                         metrics=metrics, is_binary=args.nb_classes == 1)
+                for loader in eval_loaders
+            ]
+            stats = {
+                key: float(np.mean([item[key] for item in stats_list if key in item]))
+                for key in stats_list[0]
+            }
+            print(
+                f"Final {label} test ({filename}): accuracy={_stat_value(stats, 'accuracy'):.5f}, "
+                f"balanced_accuracy={_stat_value(stats, 'balanced_accuracy', 'accuracy'):.5f}, "
+                f"cohen_kappa={_stat_value(stats, 'cohen_kappa'):.5f}, "
+                f"f1_weighted={_stat_value(stats, 'f1_weighted'):.5f}"
             )
-        )
+            return stats
+
+        primary_test_stats = _evaluate_selected_checkpoint("checkpoint-best.pth", "validation-kappa")
+        ba_test_stats = _evaluate_selected_checkpoint("checkpoint-best-ba.pth", "validation-BA")
         if args.output_dir and utils.is_main_process():
             with open(os.path.join(args.output_dir, "final_test.json"), "w", encoding="utf-8") as f:
-                json.dump({f"test_{key}": value for key, value in test_stats.items()}, f, indent=2)
+                json.dump({
+                    "selection_metric": selection_metric,
+                    "primary_checkpoint": "checkpoint-best.pth",
+                    "primary_validation_metric": selection_metric,
+                    "primary_test": primary_test_stats,
+                    "sensitivity_checkpoint": "checkpoint-best-ba.pth",
+                    "sensitivity_validation_metric": sensitivity_metric,
+                    "sensitivity_test": ba_test_stats,
+                }, f, indent=2)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
