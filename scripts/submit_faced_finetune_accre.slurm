@@ -14,8 +14,11 @@ set -euo pipefail
 REPO_DIR="/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM"
 ENV_DIR="/data/neurogroup/mingyangjiang/venvs/labram-accre"
 DATA_DIR="${DATA_DIR:-/data/neurogroup/mingyangjiang/data/FACED}"
-OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/finetune_faced_base}"
-LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/finetune_faced_base}"
+SEED="${SEED:-0}"
+LABRAM_ADAPTER_TYPE="${LABRAM_ADAPTER_TYPE:-none}"
+RUN_ID="${RUN_ID:-faced_labram_${LABRAM_ADAPTER_TYPE}_seed${SEED}}"
+OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
+LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/$RUN_ID}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
@@ -25,13 +28,12 @@ LR="${LR:-5e-4}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.05}"
 LAYER_DECAY="${LAYER_DECAY:-0.65}"
 DROP_PATH="${DROP_PATH:-0.1}"
-LABRAM_ADAPTER_TYPE="${LABRAM_ADAPTER_TYPE:-none}"
 LABRAM_ADAPTER_BOTTLENECK="${LABRAM_ADAPTER_BOTTLENECK:-64}"
 LABRAM_ADAPTER_HEADS="${LABRAM_ADAPTER_HEADS:-4}"
 LABRAM_ADAPTER_DROPOUT="${LABRAM_ADAPTER_DROPOUT:-0.0}"
-LABRAM_ADAPTER_INIT_ALPHA="${LABRAM_ADAPTER_INIT_ALPHA:-1e-3}"
+LABRAM_ADAPTER_INIT_ALPHA="${LABRAM_ADAPTER_INIT_ALPHA:-0.01}"
 LABRAM_ADAPTER_GAMMA="${LABRAM_ADAPTER_GAMMA:-1.0}"
-LABRAM_ADAPTER_RESIDUAL_PROJ_INIT_STD="${LABRAM_ADAPTER_RESIDUAL_PROJ_INIT_STD:-1e-5}"
+LABRAM_ADAPTER_SEED="${LABRAM_ADAPTER_SEED:-12345}"
 LABRAM_ADAPTER_USE_TOKEN_MLP="${LABRAM_ADAPTER_USE_TOKEN_MLP:-0}"
 LABRAM_ADAPTER_DEPTH_MODE="${LABRAM_ADAPTER_DEPTH_MODE:-none}"
 LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-4}"
@@ -57,6 +59,11 @@ print("lmdb:", lmdb.__file__)
 PY
 nvidia-smi || true
 echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE" >&2
+echo "git_commit: $(git rev-parse HEAD)" >&2
+if [[ -f ./checkpoints/labram-base.pth ]]; then
+  echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
+fi
+echo "run_id: $RUN_ID seed: $SEED" >&2
 
 PYTHON_ARGS=()
 if [[ "$LABRAM_ADAPTER_USE_TOKEN_MLP" == "1" ]]; then
@@ -86,7 +93,7 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --labram_adapter_dropout "$LABRAM_ADAPTER_DROPOUT" \
   --labram_adapter_init_alpha "$LABRAM_ADAPTER_INIT_ALPHA" \
   --labram_adapter_gamma "$LABRAM_ADAPTER_GAMMA" \
-  --labram_adapter_residual_proj_init_std "$LABRAM_ADAPTER_RESIDUAL_PROJ_INIT_STD" \
+  --labram_adapter_seed "$LABRAM_ADAPTER_SEED" \
   --labram_adapter_depth_mode "$LABRAM_ADAPTER_DEPTH_MODE" \
   --labram_adapter_depth_k "$LABRAM_ADAPTER_DEPTH_K" \
   --save_ckpt_freq 5 \
@@ -94,6 +101,6 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --abs_pos_emb \
   --dataset FACED \
   --disable_qkv_bias \
-  --seed 0 \
+  --seed "$SEED" \
   --num_workers "$NUM_WORKERS" \
   "${PYTHON_ARGS[@]}"

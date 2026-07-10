@@ -67,12 +67,12 @@ def get_args():
                         help='Attention heads for channel-axis and patch-axis adapter mixers.')
     parser.add_argument('--labram_adapter_dropout', default=0.0, type=float,
                         help='Dropout inside the LaBraM-native adapter.')
-    parser.add_argument('--labram_adapter_init_alpha', default=1e-3, type=float,
+    parser.add_argument('--labram_adapter_init_alpha', default=0.01, type=float,
                         help='Initial scalar for each enabled adapter branch.')
     parser.add_argument('--labram_adapter_gamma', default=1.0, type=float,
                         help='Scalar multiplier on the residual adapter correction.')
-    parser.add_argument('--labram_adapter_residual_proj_init_std', default=1e-5, type=float,
-                        help='Stddev for the adapter residual projection; set 0 for exact zero correction.')
+    parser.add_argument('--labram_adapter_seed', default=12345, type=int,
+                        help='Independent seed for adapter-only parameter initialization.')
     parser.add_argument('--labram_adapter_use_token_mlp', action='store_true', default=False,
                         help='Enable optional token-wise MLP adapter branch. Disabled by default.')
     parser.add_argument('--labram_adapter_depth_mode', default='none',
@@ -239,7 +239,7 @@ def get_models(args):
         adapter_dropout=args.labram_adapter_dropout,
         adapter_init_alpha=args.labram_adapter_init_alpha,
         adapter_gamma=args.labram_adapter_gamma,
-        adapter_residual_proj_init_std=args.labram_adapter_residual_proj_init_std,
+        adapter_seed=args.labram_adapter_seed,
         adapter_use_token_mlp=args.labram_adapter_use_token_mlp,
         adapter_depth_mode=args.labram_adapter_depth_mode,
         adapter_depth_k=args.labram_adapter_depth_k,

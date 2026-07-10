@@ -145,6 +145,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(weight_decay=weight_decay_value)
         metric_logger.update(grad_norm=grad_norm)
 
+        core_model = model.module if hasattr(model, 'module') else model
+        if hasattr(core_model, 'get_adapter_diagnostics'):
+            adapter_diagnostics = core_model.get_adapter_diagnostics()
+            for name, value in adapter_diagnostics.items():
+                metric_logger.update(**{name: value})
+
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
             log_writer.update(class_acc=class_acc, head="loss")
@@ -153,6 +159,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.update(min_lr=min_lr, head="opt")
             log_writer.update(weight_decay=weight_decay_value, head="opt")
             log_writer.update(grad_norm=grad_norm, head="opt")
+            for name, value in adapter_diagnostics.items() if 'adapter_diagnostics' in locals() else []:
+                log_writer.update(**{name: value}, head="adapter")
 
             log_writer.set_step()
 

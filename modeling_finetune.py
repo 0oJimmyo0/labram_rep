@@ -354,8 +354,8 @@ class NeuralTransformer(nn.Module):
                  use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False,
                  use_mean_pooling=True, init_scale=0.001, adapter_type="none",
                  adapter_bottleneck=64, adapter_num_heads=4, adapter_dropout=0.0,
-                 adapter_init_alpha=1e-3, adapter_gamma=1.0,
-                 adapter_residual_proj_init_std=1e-5,
+                 adapter_init_alpha=0.01, adapter_gamma=1.0,
+                 adapter_seed=12345,
                  adapter_use_token_mlp=False, adapter_depth_mode="none",
                  adapter_depth_k=4, adapter_gamma_zero_skip_branch=False,
                  **kwargs):
@@ -404,25 +404,12 @@ class NeuralTransformer(nn.Module):
             raise ValueError("adapter_depth_mode must be 'none' or 'lastk_delta'")
         self.adapter_type = adapter_type
         self.adapter_gamma = float(adapter_gamma)
+        self.adapter_seed = int(adapter_seed)
         self.adapter_depth_mode = adapter_depth_mode
         self.adapter_depth_k = max(1, int(adapter_depth_k))
         self.adapter_gamma_zero_skip_branch = bool(adapter_gamma_zero_skip_branch)
-        self.adapter_residual_proj_init_std = float(adapter_residual_proj_init_std)
         self.native_axis_adapter = None
-        self.adapter_residual_proj = None
-        if self.adapter_type != "none":
-            self.native_axis_adapter = LaBraMNativeAxisResidualAdapter(
-                dim=embed_dim,
-                bottleneck=adapter_bottleneck,
-                num_heads=adapter_num_heads,
-                dropout=adapter_dropout,
-                init_alpha=adapter_init_alpha,
-                use_channel_mixer=self.adapter_type in {"channel", "channel_patch"},
-                use_patch_mixer=self.adapter_type in {"patch", "channel_patch"},
-                use_token_mlp=adapter_use_token_mlp,
-                depth_dim=embed_dim if self.adapter_depth_mode != "none" else 0,
-            )
-            self.adapter_residual_proj = nn.Linear(embed_dim, embed_dim)
+        self._adapter_last_delta_ratio = None
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=.02)
@@ -434,11 +421,31 @@ class NeuralTransformer(nn.Module):
             trunc_normal_(self.head.weight, std=.02)
         self.apply(self._init_weights)
         self.fix_init_weight()
-        self._init_adapter_residual()
 
         if isinstance(self.head, nn.Linear):
             self.head.weight.data.mul_(init_scale)
             self.head.bias.data.mul_(init_scale)
+
+        # Keep adapter RNG independent from the common LaBraM initialization.
+        # This preserves dense-vs-adapter parity for all shared parameters.
+        if self.adapter_type != "none":
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(self.adapter_seed)
+                self.native_axis_adapter = LaBraMNativeAxisResidualAdapter(
+                    dim=embed_dim,
+                    bottleneck=adapter_bottleneck,
+                    num_heads=adapter_num_heads,
+                    dropout=adapter_dropout,
+                    init_alpha=adapter_init_alpha,
+                    use_channel_mixer=self.adapter_type in {"channel", "channel_patch"},
+                    use_patch_mixer=self.adapter_type in {"patch", "channel_patch"},
+                    use_token_mlp=adapter_use_token_mlp,
+                    depth_dim=embed_dim if self.adapter_depth_mode != "none" else 0,
+                )
+                self.native_axis_adapter.apply(self._init_weights)
+                if self.native_axis_adapter.depth_gate is not None:
+                    nn.init.zeros_(self.native_axis_adapter.depth_gate[1].weight)
+                    nn.init.zeros_(self.native_axis_adapter.depth_gate[1].bias)
 
         if self.native_axis_adapter is not None:
             alpha_info = []
@@ -454,22 +461,6 @@ class NeuralTransformer(nn.Module):
                 f"{' '.join(alpha_info)}",
                 flush=True,
             )
-
-    def _init_adapter_residual(self):
-        if self.adapter_residual_proj is None:
-            return
-        if self.adapter_residual_proj_init_std > 0.0:
-            nn.init.normal_(
-                self.adapter_residual_proj.weight,
-                mean=0.0,
-                std=self.adapter_residual_proj_init_std,
-            )
-        else:
-            nn.init.zeros_(self.adapter_residual_proj.weight)
-        nn.init.zeros_(self.adapter_residual_proj.bias)
-        if self.native_axis_adapter is not None and self.native_axis_adapter.depth_gate is not None:
-            nn.init.zeros_(self.native_axis_adapter.depth_gate[1].weight)
-            nn.init.zeros_(self.native_axis_adapter.depth_gate[1].bias)
 
     def fix_init_weight(self):
         def rescale(param, layer_id):
@@ -497,6 +488,28 @@ class NeuralTransformer(nn.Module):
 
     def get_classifier(self):
         return self.head
+
+    def get_adapter_diagnostics(self):
+        """Return cheap scalar diagnostics for training logs."""
+        if self.native_axis_adapter is None:
+            return {}
+        diagnostics = {}
+        for name in ("alpha_channel", "alpha_patch", "alpha_token"):
+            if hasattr(self.native_axis_adapter, name):
+                diagnostics[name] = float(getattr(self.native_axis_adapter, name).detach().cpu())
+        if self._adapter_last_delta_ratio is not None:
+            diagnostics["adapter_delta_ratio"] = self._adapter_last_delta_ratio
+        adapter_grad_sq = 0.0
+        for parameter in self.native_axis_adapter.parameters():
+            if parameter.grad is not None:
+                adapter_grad_sq += float(parameter.grad.detach().float().pow(2).sum().cpu())
+        diagnostics["adapter_grad_norm"] = adapter_grad_sq ** 0.5
+        last_block_grad_sq = 0.0
+        for parameter in self.blocks[-1].parameters():
+            if parameter.grad is not None:
+                last_block_grad_sq += float(parameter.grad.detach().float().pow(2).sum().cpu())
+        diagnostics["last_block_grad_norm"] = last_block_grad_sq ** 0.5
+        return diagnostics
 
     def reset_classifier(self, num_classes, global_pool=''):
         self.num_classes = num_classes
@@ -564,6 +577,7 @@ class NeuralTransformer(nn.Module):
                 return x[:, 0]
 
     def forward_features_with_adapter(self, x, input_chans=None, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+        self._adapter_last_delta_ratio = None
         batch_size, n, a, t = x.shape
         input_time_window = a if t == self.patch_size else t
         x = self.patch_embed(x)
@@ -592,48 +606,36 @@ class NeuralTransformer(nn.Module):
             if use_depth and idx >= start_idx:
                 depth_stats.append((x[:, 1:, :] - prev_x[:, 1:, :]).mean(dim=1))
 
-        x = self.norm(x)
-        if self.fc_norm is None:
-            if return_all_tokens:
-                base_out = x
-            elif return_patch_tokens:
-                base_out = x[:, 1:]
-            else:
-                base_out = x[:, 0]
-            if self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0:
-                return base_out
-            raise NotImplementedError("LaBraM native adapter currently requires use_mean_pooling=True.")
-
-        if return_all_tokens:
-            base_out = self.fc_norm(x)
-            if self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0:
-                return base_out
-            raise NotImplementedError("Adapter mode currently supports pooled or patch-token outputs, not all tokens.")
-
         patch_tokens = x[:, 1:, :]
-        norm_patch_tokens = self.fc_norm(patch_tokens)
-        if return_patch_tokens:
-            base_out = norm_patch_tokens
-        else:
-            base_out = self.fc_norm(patch_tokens.mean(1))
-
-        if self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0:
-            return base_out
-
-        if norm_patch_tokens.shape[1] != n * input_time_window:
+        expected_tokens = n * input_time_window
+        if patch_tokens.shape[1] != expected_tokens:
             raise ValueError(
-                f"LaBraM adapter expected {n * input_time_window} patch tokens, got {norm_patch_tokens.shape[1]}"
+                f"LaBraM adapter expected {expected_tokens} patch tokens, got {patch_tokens.shape[1]}"
             )
-        token_grid = norm_patch_tokens.reshape(batch_size, n, input_time_window, norm_patch_tokens.shape[-1])
-        depth_summary = torch.stack(depth_stats, dim=1).mean(dim=1) if depth_stats else None
-        delta_grid = self.native_axis_adapter(token_grid, depth_summary=depth_summary)
-        delta_tokens = self.adapter_residual_proj(delta_grid.reshape(batch_size, -1, delta_grid.shape[-1]))
+        if not (self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0):
+            token_grid = patch_tokens.reshape(batch_size, n, input_time_window, patch_tokens.shape[-1])
+            depth_summary = torch.stack(depth_stats, dim=1).mean(dim=1) if depth_stats else None
+            delta_grid = self.native_axis_adapter(token_grid, depth_summary=depth_summary)
+            correction = self.adapter_gamma * delta_grid.reshape(batch_size, expected_tokens, -1)
+            self._adapter_last_delta_ratio = float(
+                correction.detach().float().norm().div(patch_tokens.detach().float().norm().clamp_min(1e-12)).cpu()
+            )
+            patch_tokens = patch_tokens + correction
+            x = torch.cat((x[:, :1, :], patch_tokens), dim=1)
 
+        x = self.norm(x)
+        if self.fc_norm is not None:
+            if return_all_tokens:
+                return self.fc_norm(x)
+            patch_tokens = x[:, 1:, :]
+            if return_patch_tokens:
+                return self.fc_norm(patch_tokens)
+            return self.fc_norm(patch_tokens.mean(1))
+        if return_all_tokens:
+            return x
         if return_patch_tokens:
-            return base_out + self.adapter_gamma * delta_tokens
-
-        delta_feat = delta_tokens.mean(dim=1)
-        return base_out + self.adapter_gamma * delta_feat
+            return x[:, 1:]
+        return x[:, 0]
 
     def forward(self, x, input_chans=None, return_patch_tokens=False, return_all_tokens=False, **kwargs):
         '''
