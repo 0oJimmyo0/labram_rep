@@ -509,6 +509,11 @@ class NeuralTransformer(nn.Module):
             if parameter.grad is not None:
                 last_block_grad_sq += float(parameter.grad.detach().float().pow(2).sum().cpu())
         diagnostics["last_block_grad_norm"] = last_block_grad_sq ** 0.5
+        classifier_grad_sq = 0.0
+        for parameter in self.head.parameters():
+            if parameter.grad is not None:
+                classifier_grad_sq += float(parameter.grad.detach().float().pow(2).sum().cpu())
+        diagnostics["classifier_grad_norm"] = classifier_grad_sq ** 0.5
         return diagnostics
 
     def reset_classifier(self, num_classes, global_pool=''):

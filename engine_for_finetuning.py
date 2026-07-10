@@ -95,6 +95,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
 
+        adapter_diagnostics = {}
+        core_model = model.module if hasattr(model, 'module') else model
+
         if loss_scaler is None:
             loss /= update_freq
             model.backward(loss)
@@ -114,17 +117,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
                                     parameters=model.parameters(), create_graph=is_second_order,
                                     update_grad=(data_iter_step + 1) % update_freq == 0)
+            if hasattr(core_model, 'get_adapter_diagnostics'):
+                # NativeScaler performs backward, unscaling, and optimizer.step,
+                # but it does not clear gradients. Capture them before zero_grad.
+                adapter_diagnostics = core_model.get_adapter_diagnostics()
             if (data_iter_step + 1) % update_freq == 0:
                 optimizer.zero_grad()
                 if model_ema is not None:
                     model_ema.update(model)
             loss_scale_value = loss_scaler.state_dict()["scale"]
-
-        adapter_diagnostics = {}
-        core_model = model.module if hasattr(model, 'module') else model
-        if hasattr(core_model, 'get_adapter_diagnostics'):
-            # Capture gradients before optimizer.zero_grad() clears them.
-            adapter_diagnostics = core_model.get_adapter_diagnostics()
 
         torch.cuda.synchronize()
 
