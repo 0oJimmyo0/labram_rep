@@ -260,12 +260,105 @@ class TemporalConv(nn.Module):
         return x
 
 
+class LaBraMNativeAxisResidualAdapter(nn.Module):
+    """Lightweight residual correction over LaBraM patch-token grids [B, C, S, D]."""
+
+    def __init__(
+        self,
+        dim=200,
+        bottleneck=64,
+        num_heads=4,
+        dropout=0.0,
+        init_alpha=1e-3,
+        use_channel_mixer=True,
+        use_patch_mixer=True,
+        use_token_mlp=False,
+        depth_dim=0,
+    ):
+        super().__init__()
+        self.depth_dim = int(depth_dim)
+
+        if use_channel_mixer:
+            self.channel_norm = nn.LayerNorm(dim)
+            self.channel_attn = nn.MultiheadAttention(
+                embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
+            self.alpha_channel = nn.Parameter(torch.tensor(float(init_alpha)))
+
+        if use_patch_mixer:
+            self.patch_norm = nn.LayerNorm(dim)
+            self.patch_attn = nn.MultiheadAttention(
+                embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
+            self.alpha_patch = nn.Parameter(torch.tensor(float(init_alpha)))
+
+        if use_token_mlp:
+            hidden = max(1, int(bottleneck))
+            self.token_norm = nn.LayerNorm(dim)
+            self.token_mlp = nn.Sequential(
+                nn.Linear(dim, hidden),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, dim),
+            )
+            self.alpha_token = nn.Parameter(torch.tensor(float(init_alpha)))
+
+        if self.depth_dim > 0:
+            self.depth_gate = nn.Sequential(
+                nn.LayerNorm(self.depth_dim),
+                nn.Linear(self.depth_dim, dim),
+                nn.Tanh(),
+            )
+            nn.init.zeros_(self.depth_gate[1].weight)
+            nn.init.zeros_(self.depth_gate[1].bias)
+        else:
+            self.depth_gate = None
+
+    def forward(self, x, depth_summary=None):
+        if x.dim() != 4:
+            raise ValueError(f"Expected [B,C,S,D], got {tuple(x.shape)}")
+
+        batch_size, channels, patches, dim = x.shape
+        delta = torch.zeros_like(x)
+
+        if hasattr(self, "channel_attn"):
+            xc = x.permute(0, 2, 1, 3).reshape(batch_size * patches, channels, dim)
+            xc = self.channel_norm(xc)
+            yc, _ = self.channel_attn(xc, xc, xc, need_weights=False)
+            yc = yc.reshape(batch_size, patches, channels, dim).permute(0, 2, 1, 3)
+            delta = delta + self.alpha_channel * yc
+
+        if hasattr(self, "patch_attn"):
+            xp = x.reshape(batch_size * channels, patches, dim)
+            xp = self.patch_norm(xp)
+            yp, _ = self.patch_attn(xp, xp, xp, need_weights=False)
+            yp = yp.reshape(batch_size, channels, patches, dim)
+            delta = delta + self.alpha_patch * yp
+
+        if hasattr(self, "token_mlp"):
+            delta = delta + self.alpha_token * self.token_mlp(self.token_norm(x))
+
+        if self.depth_gate is not None and depth_summary is not None:
+            if depth_summary.dim() != 2 or depth_summary.shape[0] != batch_size:
+                raise ValueError(
+                    f"Expected depth_summary [B,{self.depth_dim}], got {tuple(depth_summary.shape)}"
+                )
+            gate = 1.0 + 0.1 * self.depth_gate(depth_summary).view(batch_size, 1, 1, dim)
+            delta = delta * gate
+
+        return delta
+
+
 class NeuralTransformer(nn.Module):
     def __init__(self, EEG_size=1600, patch_size=200, in_chans=1, out_chans=8, num_classes=1000, embed_dim=200, depth=12,
                  num_heads=10, mlp_ratio=4., qkv_bias=False, qk_norm=None, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, init_values=None,
                  use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False,
-                 use_mean_pooling=True, init_scale=0.001, **kwargs):
+                 use_mean_pooling=True, init_scale=0.001, adapter_type="none",
+                 adapter_bottleneck=64, adapter_num_heads=4, adapter_dropout=0.0,
+                 adapter_init_alpha=1e-3, adapter_gamma=1.0,
+                 adapter_residual_proj_init_std=1e-5,
+                 adapter_use_token_mlp=False, adapter_depth_mode="none",
+                 adapter_depth_k=4, adapter_gamma_zero_skip_branch=False,
+                 **kwargs):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
@@ -300,6 +393,37 @@ class NeuralTransformer(nn.Module):
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
+        adapter_type = str(adapter_type).strip().lower()
+        if adapter_type not in {"none", "channel", "patch", "channel_patch"}:
+            raise ValueError(
+                "adapter_type must be one of: none, channel, patch, channel_patch; "
+                f"got {adapter_type!r}"
+            )
+        adapter_depth_mode = str(adapter_depth_mode).strip().lower()
+        if adapter_depth_mode not in {"none", "lastk_delta"}:
+            raise ValueError("adapter_depth_mode must be 'none' or 'lastk_delta'")
+        self.adapter_type = adapter_type
+        self.adapter_gamma = float(adapter_gamma)
+        self.adapter_depth_mode = adapter_depth_mode
+        self.adapter_depth_k = max(1, int(adapter_depth_k))
+        self.adapter_gamma_zero_skip_branch = bool(adapter_gamma_zero_skip_branch)
+        self.adapter_residual_proj_init_std = float(adapter_residual_proj_init_std)
+        self.native_axis_adapter = None
+        self.adapter_residual_proj = None
+        if self.adapter_type != "none":
+            self.native_axis_adapter = LaBraMNativeAxisResidualAdapter(
+                dim=embed_dim,
+                bottleneck=adapter_bottleneck,
+                num_heads=adapter_num_heads,
+                dropout=adapter_dropout,
+                init_alpha=adapter_init_alpha,
+                use_channel_mixer=self.adapter_type in {"channel", "channel_patch"},
+                use_patch_mixer=self.adapter_type in {"patch", "channel_patch"},
+                use_token_mlp=adapter_use_token_mlp,
+                depth_dim=embed_dim if self.adapter_depth_mode != "none" else 0,
+            )
+            self.adapter_residual_proj = nn.Linear(embed_dim, embed_dim)
+
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=.02)
         if self.time_embed is not None:
@@ -310,10 +434,42 @@ class NeuralTransformer(nn.Module):
             trunc_normal_(self.head.weight, std=.02)
         self.apply(self._init_weights)
         self.fix_init_weight()
+        self._init_adapter_residual()
 
         if isinstance(self.head, nn.Linear):
             self.head.weight.data.mul_(init_scale)
             self.head.bias.data.mul_(init_scale)
+
+        if self.native_axis_adapter is not None:
+            alpha_info = []
+            for name in ("alpha_channel", "alpha_patch", "alpha_token"):
+                if hasattr(self.native_axis_adapter, name):
+                    value = float(getattr(self.native_axis_adapter, name).detach().cpu())
+                    alpha_info.append(f"{name}={value:.6g}")
+            print(
+                "[LaBraM adapter] native structured residual enabled: "
+                f"type={self.adapter_type} gamma={self.adapter_gamma} "
+                f"token_mlp={bool(adapter_use_token_mlp)} "
+                f"depth_mode={self.adapter_depth_mode} depth_k={self.adapter_depth_k} "
+                f"{' '.join(alpha_info)}",
+                flush=True,
+            )
+
+    def _init_adapter_residual(self):
+        if self.adapter_residual_proj is None:
+            return
+        if self.adapter_residual_proj_init_std > 0.0:
+            nn.init.normal_(
+                self.adapter_residual_proj.weight,
+                mean=0.0,
+                std=self.adapter_residual_proj_init_std,
+            )
+        else:
+            nn.init.zeros_(self.adapter_residual_proj.weight)
+        nn.init.zeros_(self.adapter_residual_proj.bias)
+        if self.native_axis_adapter is not None and self.native_axis_adapter.depth_gate is not None:
+            nn.init.zeros_(self.native_axis_adapter.depth_gate[1].weight)
+            nn.init.zeros_(self.native_axis_adapter.depth_gate[1].bias)
 
     def fix_init_weight(self):
         def rescale(param, layer_id):
@@ -358,6 +514,15 @@ class NeuralTransformer(nn.Module):
         return self.pos_embed[:, :num_channels + 1]
 
     def forward_features(self, x, input_chans=None, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+        if self.native_axis_adapter is not None:
+            return self.forward_features_with_adapter(
+                x,
+                input_chans=input_chans,
+                return_patch_tokens=return_patch_tokens,
+                return_all_tokens=return_all_tokens,
+                **kwargs,
+            )
+
         batch_size, n, a, t = x.shape
         input_time_window = a if t == self.patch_size else t
         x = self.patch_embed(x)
@@ -397,6 +562,78 @@ class NeuralTransformer(nn.Module):
                 return x[:, 1:]
             else:
                 return x[:, 0]
+
+    def forward_features_with_adapter(self, x, input_chans=None, return_patch_tokens=False, return_all_tokens=False, **kwargs):
+        batch_size, n, a, t = x.shape
+        input_time_window = a if t == self.patch_size else t
+        x = self.patch_embed(x)
+
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+
+        pos_embed_used = self._select_pos_embed(input_chans, n)
+        if self.pos_embed is not None:
+            pos_embed = pos_embed_used[:, 1:, :].unsqueeze(2).expand(batch_size, -1, input_time_window, -1).flatten(1, 2)
+            pos_embed = torch.cat((pos_embed_used[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
+            x = x + pos_embed
+        if self.time_embed is not None:
+            nc = n if t == self.patch_size else a
+            time_embed = self.time_embed[:, 0:input_time_window, :].unsqueeze(1).expand(batch_size, nc, -1, -1).flatten(1, 2)
+            x[:, 1:, :] += time_embed
+
+        x = self.pos_drop(x)
+
+        depth_stats = []
+        use_depth = self.adapter_depth_mode == "lastk_delta"
+        start_idx = max(0, len(self.blocks) - self.adapter_depth_k)
+        for idx, blk in enumerate(self.blocks):
+            prev_x = x
+            x = blk(x, rel_pos_bias=None)
+            if use_depth and idx >= start_idx:
+                depth_stats.append((x[:, 1:, :] - prev_x[:, 1:, :]).mean(dim=1))
+
+        x = self.norm(x)
+        if self.fc_norm is None:
+            if return_all_tokens:
+                base_out = x
+            elif return_patch_tokens:
+                base_out = x[:, 1:]
+            else:
+                base_out = x[:, 0]
+            if self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0:
+                return base_out
+            raise NotImplementedError("LaBraM native adapter currently requires use_mean_pooling=True.")
+
+        if return_all_tokens:
+            base_out = self.fc_norm(x)
+            if self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0:
+                return base_out
+            raise NotImplementedError("Adapter mode currently supports pooled or patch-token outputs, not all tokens.")
+
+        patch_tokens = x[:, 1:, :]
+        norm_patch_tokens = self.fc_norm(patch_tokens)
+        if return_patch_tokens:
+            base_out = norm_patch_tokens
+        else:
+            base_out = self.fc_norm(patch_tokens.mean(1))
+
+        if self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0:
+            return base_out
+
+        if norm_patch_tokens.shape[1] != n * input_time_window:
+            raise ValueError(
+                f"LaBraM adapter expected {n * input_time_window} patch tokens, got {norm_patch_tokens.shape[1]}"
+            )
+        token_grid = norm_patch_tokens.reshape(batch_size, n, input_time_window, norm_patch_tokens.shape[-1])
+        depth_summary = torch.stack(depth_stats, dim=1).mean(dim=1) if depth_stats else None
+        delta_grid = self.native_axis_adapter(token_grid, depth_summary=depth_summary)
+        delta_tokens = self.adapter_residual_proj(delta_grid.reshape(batch_size, -1, delta_grid.shape[-1]))
+
+        if return_patch_tokens:
+            return base_out + self.adapter_gamma * delta_tokens
+
+        delta_feat = delta_tokens.mean(dim=1)
+        return base_out + self.adapter_gamma * delta_feat
 
     def forward(self, x, input_chans=None, return_patch_tokens=False, return_all_tokens=False, **kwargs):
         '''

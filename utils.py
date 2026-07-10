@@ -881,6 +881,8 @@ def prepare_SEEDV_dataset(root):
 
 
 class FACEDLoader(torch.utils.data.Dataset):
+    expected_shape = (32, 10, 200)
+
     def __init__(self, root, mode="train"):
         self.root = root
         self.mode = mode
@@ -899,6 +901,10 @@ class FACEDLoader(torch.utils.data.Dataset):
             raise KeyError(f"FACED LMDB missing split {mode!r}; available: {list(split_index.keys())}")
         self.keys = split_index[mode]
         self.channel_names = read_faced_channel_names(root)
+        if self.channel_names is None or len(self.channel_names) != 32:
+            raise RuntimeError(
+                "FACED LaBraM runs require a validated 32-channel manifest."
+            )
 
     def __len__(self):
         return len(self.keys)
@@ -929,8 +935,11 @@ class FACEDLoader(torch.utils.data.Dataset):
             raise KeyError(f"FACED LMDB key not found: {key!r}")
         sample = pickle.loads(raw)
         X = sample["sample"]
-        if X.ndim != 3:
-            raise ValueError(f"Expected FACED sample with shape (channels, patches, 200), got {X.shape}")
+        if tuple(X.shape) != self.expected_shape:
+            raise ValueError(
+                f"FACED expected {self.expected_shape}, got {tuple(X.shape)} "
+                f"for sample key {key!r}"
+            )
         Y = int(sample["label"])
         X = torch.FloatTensor(X)
         return X, Y
@@ -939,11 +948,77 @@ class FACEDLoader(torch.utils.data.Dataset):
         return self.channel_names
 
 
+def _faced_subject_id(key):
+    text = key.decode("utf-8") if isinstance(key, bytes) else str(key)
+    return text.split(".pkl", 1)[0].split("-", 1)[0]
+
+
+def _faced_sample_stats(dataset):
+    key = dataset.keys[0]
+    enc_key = key.encode() if isinstance(key, str) else key
+    with dataset._get_db().begin(write=False) as txn:
+        raw = txn.get(enc_key)
+    if raw is None:
+        raise KeyError(f"FACED LMDB key not found while collecting diagnostics: {key!r}")
+    sample = pickle.loads(raw)
+    x = np.asarray(sample["sample"])
+    if tuple(x.shape) != FACEDLoader.expected_shape:
+        raise ValueError(
+            f"FACED expected {FACEDLoader.expected_shape}, got {tuple(x.shape)} "
+            f"for sample key {key!r}"
+        )
+    scaled = x / 100.0
+    return key, x.shape, (
+        float(x.mean()), float(x.std()), float(x.min()), float(x.max())
+    ), (
+        float(scaled.mean()), float(scaled.std()), float(scaled.min()), float(scaled.max())
+    )
+
+
+def _print_faced_contract(train_dataset, val_dataset, test_dataset):
+    key, shape, raw_stats, scaled_stats = _faced_sample_stats(train_dataset)
+    split_subjects = {
+        "train": sorted({_faced_subject_id(k) for k in train_dataset.keys}),
+        "val": sorted({_faced_subject_id(k) for k in val_dataset.keys}),
+        "test": sorted({_faced_subject_id(k) for k in test_dataset.keys}),
+    }
+    train_val_overlap = sorted(set(split_subjects["train"]) & set(split_subjects["val"]))
+    train_test_overlap = sorted(set(split_subjects["train"]) & set(split_subjects["test"]))
+    val_test_overlap = sorted(set(split_subjects["val"]) & set(split_subjects["test"]))
+    if train_val_overlap or train_test_overlap or val_test_overlap:
+        raise RuntimeError(
+            "FACED split subject overlap detected: "
+            f"train-val={train_val_overlap}, train-test={train_test_overlap}, val-test={val_test_overlap}"
+        )
+    input_chans = get_input_chans(train_dataset.channel_names)
+    print(f"[FACED] diagnostic sample key: {key!r}")
+    print(f"[FACED] raw sample shape: {tuple(shape)}")
+    print(
+        "[FACED] raw stats mean/std/min/max: "
+        f"{raw_stats[0]:.8g} {raw_stats[1]:.8g} {raw_stats[2]:.8g} {raw_stats[3]:.8g}"
+    )
+    print(
+        "[FACED] post-division-by-100 stats mean/std/min/max: "
+        f"{scaled_stats[0]:.8g} {scaled_stats[1]:.8g} {scaled_stats[2]:.8g} {scaled_stats[3]:.8g}"
+    )
+    print(f"[FACED] channel names ({len(train_dataset.channel_names)}): {train_dataset.channel_names}")
+    print(f"[FACED] mapped LaBraM input_chans ({len(input_chans)}): {input_chans}")
+    print(
+        "[FACED] sample counts: "
+        f"train={len(train_dataset)} val={len(val_dataset)} test={len(test_dataset)}"
+    )
+    print(f"[FACED] train subject IDs ({len(split_subjects['train'])}): {split_subjects['train']}")
+    print(f"[FACED] val subject IDs ({len(split_subjects['val'])}): {split_subjects['val']}")
+    print(f"[FACED] test subject IDs ({len(split_subjects['test'])}): {split_subjects['test']}")
+    print("[FACED] split-overlap checks: train-val=0 train-test=0 val-test=0")
+
+
 def prepare_FACED_dataset(root):
     train_dataset = FACEDLoader(root, mode="train")
     val_dataset = FACEDLoader(root, mode="val")
     test_dataset = FACEDLoader(root, mode="test")
     print(len(train_dataset), len(val_dataset), len(test_dataset))
+    _print_faced_contract(train_dataset, val_dataset, test_dataset)
     return train_dataset, test_dataset, val_dataset
 
 

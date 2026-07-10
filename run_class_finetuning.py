@@ -58,6 +58,31 @@ def get_args():
     parser.add_argument('--layer_scale_init_value', default=0.1, type=float, 
                         help="0.1 for base, 1e-5 for large. set 0 to disable layer scale")
 
+    parser.add_argument('--labram_adapter_type', default='none',
+                        choices=['none', 'channel', 'patch', 'channel_patch'],
+                        help='LaBraM-native structured residual adapter branch.')
+    parser.add_argument('--labram_adapter_bottleneck', default=64, type=int,
+                        help='Token-MLP bottleneck width for the optional LaBraM adapter MLP.')
+    parser.add_argument('--labram_adapter_heads', default=4, type=int,
+                        help='Attention heads for channel-axis and patch-axis adapter mixers.')
+    parser.add_argument('--labram_adapter_dropout', default=0.0, type=float,
+                        help='Dropout inside the LaBraM-native adapter.')
+    parser.add_argument('--labram_adapter_init_alpha', default=1e-3, type=float,
+                        help='Initial scalar for each enabled adapter branch.')
+    parser.add_argument('--labram_adapter_gamma', default=1.0, type=float,
+                        help='Scalar multiplier on the residual adapter correction.')
+    parser.add_argument('--labram_adapter_residual_proj_init_std', default=1e-5, type=float,
+                        help='Stddev for the adapter residual projection; set 0 for exact zero correction.')
+    parser.add_argument('--labram_adapter_use_token_mlp', action='store_true', default=False,
+                        help='Enable optional token-wise MLP adapter branch. Disabled by default.')
+    parser.add_argument('--labram_adapter_depth_mode', default='none',
+                        choices=['none', 'lastk_delta'],
+                        help='Optional depth-aware adapter gating mode. Disabled by default.')
+    parser.add_argument('--labram_adapter_depth_k', default=4, type=int,
+                        help='Number of final blocks summarized for --labram_adapter_depth_mode lastk_delta.')
+    parser.add_argument('--labram_adapter_gamma_zero_skip_branch', action='store_true', default=False,
+                        help='If gamma is zero, return dense features before computing the adapter branch.')
+
     parser.add_argument('--input_size', default=200, type=int,
                         help='EEG input size')
 
@@ -208,6 +233,17 @@ def get_models(args):
         use_abs_pos_emb=args.abs_pos_emb,
         init_values=args.layer_scale_init_value,
         qkv_bias=args.qkv_bias,
+        adapter_type=args.labram_adapter_type,
+        adapter_bottleneck=args.labram_adapter_bottleneck,
+        adapter_num_heads=args.labram_adapter_heads,
+        adapter_dropout=args.labram_adapter_dropout,
+        adapter_init_alpha=args.labram_adapter_init_alpha,
+        adapter_gamma=args.labram_adapter_gamma,
+        adapter_residual_proj_init_std=args.labram_adapter_residual_proj_init_std,
+        adapter_use_token_mlp=args.labram_adapter_use_token_mlp,
+        adapter_depth_mode=args.labram_adapter_depth_mode,
+        adapter_depth_k=args.labram_adapter_depth_k,
+        adapter_gamma_zero_skip_branch=args.labram_adapter_gamma_zero_skip_branch,
     )
 
     return model
@@ -253,11 +289,12 @@ def get_dataset(args):
         train_dataset, test_dataset, val_dataset = utils.prepare_FACED_dataset(args.data_path)
         ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
         if ch_names is None:
-            warnings.warn(
-                "FACED channel names are not encoded in the current LMDB/schema sidecars; "
-                "LaBraM will consume the stored 32-channel tensor order directly until "
-                "an explicit channel-order manifest is provided.",
-                RuntimeWarning,
+            raise RuntimeError(
+                "FACED LaBraM runs require a validated 32-channel manifest."
+            )
+        if len(ch_names) != 32:
+            raise RuntimeError(
+                "FACED LaBraM runs require a validated 32-channel manifest."
             )
         else:
             print(f"Loaded FACED channel manifest with {len(ch_names)} channels.")

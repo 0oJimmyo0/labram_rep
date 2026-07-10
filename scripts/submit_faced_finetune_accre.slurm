@@ -25,6 +25,17 @@ LR="${LR:-5e-4}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.05}"
 LAYER_DECAY="${LAYER_DECAY:-0.65}"
 DROP_PATH="${DROP_PATH:-0.1}"
+LABRAM_ADAPTER_TYPE="${LABRAM_ADAPTER_TYPE:-none}"
+LABRAM_ADAPTER_BOTTLENECK="${LABRAM_ADAPTER_BOTTLENECK:-64}"
+LABRAM_ADAPTER_HEADS="${LABRAM_ADAPTER_HEADS:-4}"
+LABRAM_ADAPTER_DROPOUT="${LABRAM_ADAPTER_DROPOUT:-0.0}"
+LABRAM_ADAPTER_INIT_ALPHA="${LABRAM_ADAPTER_INIT_ALPHA:-1e-3}"
+LABRAM_ADAPTER_GAMMA="${LABRAM_ADAPTER_GAMMA:-1.0}"
+LABRAM_ADAPTER_RESIDUAL_PROJ_INIT_STD="${LABRAM_ADAPTER_RESIDUAL_PROJ_INIT_STD:-1e-5}"
+LABRAM_ADAPTER_USE_TOKEN_MLP="${LABRAM_ADAPTER_USE_TOKEN_MLP:-0}"
+LABRAM_ADAPTER_DEPTH_MODE="${LABRAM_ADAPTER_DEPTH_MODE:-none}"
+LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-4}"
+LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH="${LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH:-0}"
 
 mkdir -p "$REPO_DIR/logs/out" "$REPO_DIR/logs/err" "$LOG_DIR" "$OUTPUT_DIR"
 
@@ -45,7 +56,15 @@ print("gpu count:", torch.cuda.device_count())
 print("lmdb:", lmdb.__file__)
 PY
 nvidia-smi || true
-echo "FACED baseline launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS" >&2
+echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE" >&2
+
+PYTHON_ARGS=()
+if [[ "$LABRAM_ADAPTER_USE_TOKEN_MLP" == "1" ]]; then
+  PYTHON_ARGS+=(--labram_adapter_use_token_mlp)
+fi
+if [[ "$LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH" == "1" ]]; then
+  PYTHON_ARGS+=(--labram_adapter_gamma_zero_skip_branch)
+fi
 
 OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_NODE" run_class_finetuning.py \
   --output_dir "$OUTPUT_DIR" \
@@ -61,10 +80,20 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --epochs "$EPOCHS" \
   --layer_decay "$LAYER_DECAY" \
   --drop_path "$DROP_PATH" \
+  --labram_adapter_type "$LABRAM_ADAPTER_TYPE" \
+  --labram_adapter_bottleneck "$LABRAM_ADAPTER_BOTTLENECK" \
+  --labram_adapter_heads "$LABRAM_ADAPTER_HEADS" \
+  --labram_adapter_dropout "$LABRAM_ADAPTER_DROPOUT" \
+  --labram_adapter_init_alpha "$LABRAM_ADAPTER_INIT_ALPHA" \
+  --labram_adapter_gamma "$LABRAM_ADAPTER_GAMMA" \
+  --labram_adapter_residual_proj_init_std "$LABRAM_ADAPTER_RESIDUAL_PROJ_INIT_STD" \
+  --labram_adapter_depth_mode "$LABRAM_ADAPTER_DEPTH_MODE" \
+  --labram_adapter_depth_k "$LABRAM_ADAPTER_DEPTH_K" \
   --save_ckpt_freq 5 \
   --disable_rel_pos_bias \
   --abs_pos_emb \
   --dataset FACED \
   --disable_qkv_bias \
   --seed 0 \
-  --num_workers "$NUM_WORKERS"
+  --num_workers "$NUM_WORKERS" \
+  "${PYTHON_ARGS[@]}"
