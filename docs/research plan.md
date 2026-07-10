@@ -75,6 +75,8 @@ depth_mode=none
 
 Use seed `3407` first as a screening pass. If the improvement remains promising, run dense and the selected adapter across seeds `42`, `1024`, and `3407`, then choose alpha by mean paired validation performance.
 
+The seed-3407 screening jobs for alpha `0.003` and `0.030` are queued. The alpha `0.010` result is already available from the completed patch-only run. A channel-plus-patch alpha `0.010` retry is also queued with `NUM_WORKERS=0` to remove the LMDB worker failure.
+
 ### 4. Confirm the paper claim
 
 After selecting one structure and alpha, run a final multi-seed dense-versus-adapter confirmation. Evaluate test only from checkpoints selected by validation kappa. Report test BA as primary, with test weighted F1 and test kappa as secondary outcomes.
@@ -95,4 +97,3 @@ Do not combine learning-rate changes, depth gating, token MLP, larger bottleneck
 - Routing mechanisms
 - Larger adapter bottlenecks
 - Adapter learning-rate sweeps before alpha calibration
-
