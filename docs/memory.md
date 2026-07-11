@@ -101,7 +101,7 @@ Submitted after the seed-3407 screen:
 - Job `12475956`: patch-only, alpha `0.003`, strong recipe, seed `3407`.
 - Job `12475958`: patch-only, alpha `0.030`, strong recipe, seed `3407`.
 - Job `12475957`: channel-plus-patch, alpha `0.010`, strong recipe, seed `3407`, `NUM_WORKERS=0` retry.
-- Job `12481023`: patch-only, alpha `0.030`, strong recipe, seed `3407`, `NUM_WORKERS=0` retry after the worker segfault.
+- Job `12481023`: patch-only, alpha `0.030`, strong recipe, seed `3407`, `NUM_WORKERS=0` retry after the worker segfault; complete.
 
 All three jobs use validation kappa as the primary checkpoint-selection metric and validation BA as the sensitivity checkpoint. Do not use their test metrics to select alpha or structure.
 
@@ -109,7 +109,9 @@ Follow-up results:
 
 - Patch alpha `0.003`: validation kappa `0.39444`, validation BA `0.46435`; below alpha `0.010`.
 - Channel-plus-patch retry alpha `0.010`: validation kappa `0.35093`, validation BA `0.42670`; below dense and patch-only.
-- Patch alpha `0.030`: original run failed from an LMDB DataLoader worker segfault; retry job `12481023` is pending.
+- Patch alpha `0.030`: retry completed with validation kappa `0.38127`, validation BA `0.45247`; below alpha `0.010`.
+
+The seed-3407 alpha screen therefore selects patch-only alpha `0.010` by validation kappa, with validation BA as the sensitivity check. The next required test is paired dense-versus-patch alpha `0.010` across seeds `42`, `1024`, and `3407`.
 
 ## Operational Commands
 
