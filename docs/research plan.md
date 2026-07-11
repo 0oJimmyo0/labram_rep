@@ -75,7 +75,9 @@ depth_mode=none
 
 Use seed `3407` first as a screening pass. If the improvement remains promising, run dense and the selected adapter across seeds `42`, `1024`, and `3407`, then choose alpha by mean paired validation performance.
 
-The seed-3407 screening jobs for alpha `0.003` and `0.030` are queued. The alpha `0.010` result is already available from the completed patch-only run. A channel-plus-patch alpha `0.010` retry is also queued with `NUM_WORKERS=0` to remove the LMDB worker failure.
+The seed-3407 screening jobs for alpha `0.003` and `0.030` were submitted. The alpha `0.010` result is already available from the completed patch-only run. A channel-plus-patch alpha `0.010` retry was also submitted with `NUM_WORKERS=0` to remove the LMDB worker failure.
+
+The alpha `0.003` run completed below alpha `0.010` on validation metrics. The alpha `0.030` run is being retried with `NUM_WORKERS=0` after the original LMDB worker failure. The channel-plus-patch retry completed below both dense and patch-only.
 
 ### 4. Confirm the paper claim
 
