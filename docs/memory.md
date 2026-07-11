@@ -113,6 +113,19 @@ Follow-up results:
 
 The seed-3407 alpha screen therefore selects patch-only alpha `0.010` by validation kappa, with validation BA as the sensitivity check. The next required test is paired dense-versus-patch alpha `0.010` across seeds `42`, `1024`, and `3407`.
 
+Seed-3407 paired validation deltas at the selected checkpoints:
+
+- Delta validation kappa: `+0.05779` (`0.42660 - 0.36881`)
+- Delta validation BA: `+0.05108` (`0.49352 - 0.44244`)
+- Delta validation weighted F1: `+0.05337` (`0.49177 - 0.43840`)
+
+Paired confirmation jobs submitted:
+
+- Dense seed `42`: job `12482796`.
+- Patch alpha `0.010` seed `42`: job `12482795`.
+- Dense seed `1024`: job `12482794`.
+- Patch alpha `0.010` seed `1024`: job `12482797`.
+
 ## Operational Commands
 
 Submit through the run-organized wrapper:
