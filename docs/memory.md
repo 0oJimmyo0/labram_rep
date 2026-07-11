@@ -126,6 +126,16 @@ Paired confirmation jobs submitted:
 - Dense seed `1024`: job `12482794`.
 - Patch alpha `0.010` seed `1024`: job `12482797`.
 
+Overnight shared hyperparameter screening is queued behind jobs `12482794`, `12482795`, `12482796`, and `12482797`. It contains matched dense and patch alpha `0.010` runs at seed `3407` for:
+
+```text
+learning_rate in {5e-4, 7e-4, 9e-4}
+warmup_epochs in {5, 10}
+batch_size=16, epochs=80, weight_decay=0.05, layer_decay=0.65, drop_path=0.1
+```
+
+The 12 jobs are `12482942` through `12482953`. Only the top two shared recipes by validation metrics will be replicated across the remaining development seeds.
+
 ## Operational Commands
 
 Submit through the run-organized wrapper:
