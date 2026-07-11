@@ -43,6 +43,11 @@ LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-4}"
 LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH="${LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH:-0}"
 SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-0}"
 
+if ! awk -v lr="$LR" 'BEGIN { exit !(lr + 0 > 0) }'; then
+  echo "LR must be a positive numeric value; got: $LR" >&2
+  exit 2
+fi
+
 mkdir -p "$REPO_DIR/logs/out" "$REPO_DIR/logs/err" "$LOG_DIR" "$OUTPUT_DIR"
 
 unset PYTHONPATH CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL
