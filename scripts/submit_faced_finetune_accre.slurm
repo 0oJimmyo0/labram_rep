@@ -48,6 +48,12 @@ if ! awk -v lr="$LR" 'BEGIN { exit !(lr + 0 > 0) }'; then
   exit 2
 fi
 
+if [[ -d "$OUTPUT_DIR" ]] && find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+  echo "Refusing to reuse nonempty output directory: $OUTPUT_DIR" >&2
+  echo "Choose a new RUN_ID/OUTPUT_DIR; sweep jobs must not auto-resume." >&2
+  exit 2
+fi
+
 mkdir -p "$REPO_DIR/logs/out" "$REPO_DIR/logs/err" "$LOG_DIR" "$OUTPUT_DIR"
 
 unset PYTHONPATH CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL
@@ -101,6 +107,7 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --weight_decay "$WEIGHT_DECAY" \
   --batch_size "$BATCH_SIZE" \
   --lr "$LR" \
+  --requested_lr_string "$LR" \
   --update_freq 1 \
   --warmup_epochs "$WARMUP_EPOCHS" \
   --epochs "$EPOCHS" \
@@ -123,4 +130,5 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --disable_qkv_bias \
   --seed "$SEED" \
   --num_workers "$NUM_WORKERS" \
+  --no_auto_resume \
   "${PYTHON_ARGS[@]}"

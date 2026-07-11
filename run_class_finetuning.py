@@ -20,6 +20,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import json
 import os
+import subprocess
 
 from pathlib import Path
 from collections import OrderedDict
@@ -126,6 +127,8 @@ def get_args():
 
     parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
                         help='learning rate (default: 5e-4)')
+    parser.add_argument('--requested_lr_string', default=None,
+                        help='Original LR string from the launcher, retained for run provenance.')
     parser.add_argument('--layer_decay', type=float, default=0.9)
 
     parser.add_argument('--warmup_lr', type=float, default=1e-6, metavar='LR',
@@ -565,6 +568,45 @@ def main(args, ds_init):
     wd_schedule_values = utils.cosine_scheduler(
         args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
     print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
+
+    max_scheduled_lr = float(max(lr_schedule_values))
+    lr_tolerance = max(1e-12, abs(float(args.lr)) * 1e-6)
+    if not args.lr > 0:
+        raise ValueError(f"Parsed learning rate must be positive, got {args.lr!r}")
+    if not max_scheduled_lr > 0:
+        raise ValueError(f"Scheduled learning rate must be positive, got {max_scheduled_lr!r}")
+    if abs(max_scheduled_lr - float(args.lr)) >= lr_tolerance:
+        raise ValueError(
+            f"Maximum scheduled LR {max_scheduled_lr:.12g} does not match parsed LR "
+            f"{args.lr:.12g} within tolerance {lr_tolerance:.3g}"
+        )
+    assert args.lr > 0
+    assert max_scheduled_lr > 0
+    assert abs(max_scheduled_lr - float(args.lr)) < lr_tolerance
+
+    try:
+        git_commit = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=Path(__file__).resolve().parent,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        git_commit = 'unknown'
+    run_config = {
+        'requested_lr_string': args.requested_lr_string or str(args.lr),
+        'parsed_args_lr': float(args.lr),
+        'max_scheduled_lr': max_scheduled_lr,
+        'warmup_epochs': int(args.warmup_epochs),
+        'seed': int(args.seed),
+        'adapter_type': args.labram_adapter_type,
+        'adapter_lr_scale': float(args.labram_adapter_lr_scale),
+        'git_commit': git_commit,
+        'output_dir': os.path.abspath(args.output_dir) if args.output_dir else '',
+    }
+    print('Run contract: ' + json.dumps(run_config, sort_keys=True), flush=True)
+    if args.output_dir and utils.is_main_process():
+        with open(os.path.join(args.output_dir, 'run_config.json'), 'w', encoding='utf-8') as f:
+            json.dump(run_config, f, indent=2)
 
     if args.nb_classes == 1:
         criterion = torch.nn.BCEWithLogitsLoss()
