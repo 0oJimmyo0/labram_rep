@@ -138,6 +138,33 @@ The 12 jobs are `12482942` through `12482953`. Only the top two shared recipes b
 
 ## Operational Commands
 
+## Adapter Optimizer Control (Current Branch)
+
+The patch adapter is a full-width `D=200` multihead-attention residual branch. Its
+`adapter_bottleneck` argument only controls the optional token MLP and does not
+bottleneck patch attention. Before this correction, `native_axis_adapter.*`
+parameters were assigned to the same highest layer-decay groups as pretrained
+upper-block parameters.
+
+The current branch adds:
+
+- `--labram_adapter_lr_scale`, applied to the effective layer-decayed LR of every
+  `native_axis_adapter.*` parameter;
+- `--labram_adapter_weight_decay`, applied to adapter matrix groups while scalar
+  gates and biases remain in no-decay groups;
+- per-epoch `backbone_lr` and `adapter_lr` diagnostics in training logs;
+- `--skip_final_test` for validation-only development sweeps.
+
+When adapter weight decay is explicitly supplied, it is held at that value rather
+than overwritten by the global backbone WD schedule. With the new flags omitted,
+the previous optimizer behavior is preserved.
+
+The next optimization phase should keep patch-only, alpha `0.01`, warmup `10`,
+token MLP off, and depth mode `none`, then screen adapter LR scales `{0.1, 0.3,
+1.0}` against global LRs `{5e-4, 7e-4, 9e-4}` on development seeds `42` and
+`1024`. Use `--skip_final_test` during this phase and select only by validation
+kappa, with validation BA and weighted F1 as checks.
+
 Submit through the run-organized wrapper:
 
 ```bash

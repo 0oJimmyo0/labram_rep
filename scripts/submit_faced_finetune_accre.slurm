@@ -34,11 +34,14 @@ LABRAM_ADAPTER_HEADS="${LABRAM_ADAPTER_HEADS:-4}"
 LABRAM_ADAPTER_DROPOUT="${LABRAM_ADAPTER_DROPOUT:-0.0}"
 LABRAM_ADAPTER_INIT_ALPHA="${LABRAM_ADAPTER_INIT_ALPHA:-0.01}"
 LABRAM_ADAPTER_GAMMA="${LABRAM_ADAPTER_GAMMA:-1.0}"
+LABRAM_ADAPTER_LR_SCALE="${LABRAM_ADAPTER_LR_SCALE:-1.0}"
+LABRAM_ADAPTER_WEIGHT_DECAY="${LABRAM_ADAPTER_WEIGHT_DECAY:-}"
 LABRAM_ADAPTER_SEED="${LABRAM_ADAPTER_SEED:-12345}"
 LABRAM_ADAPTER_USE_TOKEN_MLP="${LABRAM_ADAPTER_USE_TOKEN_MLP:-0}"
 LABRAM_ADAPTER_DEPTH_MODE="${LABRAM_ADAPTER_DEPTH_MODE:-none}"
 LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-4}"
 LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH="${LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH:-0}"
+SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-0}"
 
 mkdir -p "$REPO_DIR/logs/out" "$REPO_DIR/logs/err" "$LOG_DIR" "$OUTPUT_DIR"
 
@@ -59,7 +62,7 @@ print("gpu count:", torch.cuda.device_count())
 print("lmdb:", lmdb.__file__)
 PY
 nvidia-smi || true
-echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE" >&2
+echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE ADAPTER_LR_SCALE=$LABRAM_ADAPTER_LR_SCALE ADAPTER_WD=${LABRAM_ADAPTER_WEIGHT_DECAY:-inherit} SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
 echo "git_commit: $(git rev-parse HEAD)" >&2
 if [[ -f ./checkpoints/labram-base.pth ]]; then
   echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
@@ -72,6 +75,12 @@ if [[ "$LABRAM_ADAPTER_USE_TOKEN_MLP" == "1" ]]; then
 fi
 if [[ "$LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH" == "1" ]]; then
   PYTHON_ARGS+=(--labram_adapter_gamma_zero_skip_branch)
+fi
+if [[ -n "$LABRAM_ADAPTER_WEIGHT_DECAY" ]]; then
+  PYTHON_ARGS+=(--labram_adapter_weight_decay "$LABRAM_ADAPTER_WEIGHT_DECAY")
+fi
+if [[ "$SKIP_FINAL_TEST" == "1" ]]; then
+  PYTHON_ARGS+=(--skip_final_test)
 fi
 if [[ "$DETERMINISTIC" == "1" ]]; then
   export CUBLAS_WORKSPACE_CONFIG=":4096:8"
@@ -98,6 +107,7 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --labram_adapter_dropout "$LABRAM_ADAPTER_DROPOUT" \
   --labram_adapter_init_alpha "$LABRAM_ADAPTER_INIT_ALPHA" \
   --labram_adapter_gamma "$LABRAM_ADAPTER_GAMMA" \
+  --labram_adapter_lr_scale "$LABRAM_ADAPTER_LR_SCALE" \
   --labram_adapter_seed "$LABRAM_ADAPTER_SEED" \
   --labram_adapter_depth_mode "$LABRAM_ADAPTER_DEPTH_MODE" \
   --labram_adapter_depth_k "$LABRAM_ADAPTER_DEPTH_K" \

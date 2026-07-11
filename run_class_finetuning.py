@@ -73,6 +73,10 @@ def get_args():
                         help='Initial scalar for each enabled adapter branch.')
     parser.add_argument('--labram_adapter_gamma', default=1.0, type=float,
                         help='Scalar multiplier on the residual adapter correction.')
+    parser.add_argument('--labram_adapter_lr_scale', default=1.0, type=float,
+                        help='Multiplier on the effective LR for native_axis_adapter parameters.')
+    parser.add_argument('--labram_adapter_weight_decay', default=None, type=float,
+                        help='Weight decay for native_axis_adapter matrices; default inherits global weight decay.')
     parser.add_argument('--labram_adapter_seed', default=12345, type=int,
                         help='Independent seed for adapter-only parameter initialization.')
     parser.add_argument('--labram_adapter_use_token_mlp', action='store_true', default=False,
@@ -96,6 +100,8 @@ def get_args():
                         help='Drop path rate (default: 0.1)')
 
     parser.add_argument('--disable_eval_during_finetuning', action='store_true', default=False)
+    parser.add_argument('--skip_final_test', action='store_true', default=False,
+                        help='Skip final test evaluation for validation-only development sweeps.')
 
     parser.add_argument('--model_ema', action='store_true', default=False)
     parser.add_argument('--model_ema_decay', type=float, default=0.9999, help='')
@@ -525,7 +531,10 @@ def main(args, ds_init):
         optimizer_params = get_parameter_groups(
             model, args.weight_decay, skip_weight_decay_list,
             assigner.get_layer_id if assigner is not None else None,
-            assigner.get_scale if assigner is not None else None)
+            assigner.get_scale if assigner is not None else None,
+            adapter_name_prefix='native_axis_adapter.',
+            adapter_lr_scale=args.labram_adapter_lr_scale,
+            adapter_weight_decay=args.labram_adapter_weight_decay)
         model, optimizer, _, _ = ds_init(
             args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
         )
@@ -540,7 +549,10 @@ def main(args, ds_init):
         optimizer = create_optimizer(
             args, model_without_ddp, skip_list=skip_weight_decay_list,
             get_num_layer=assigner.get_layer_id if assigner is not None else None, 
-            get_layer_scale=assigner.get_scale if assigner is not None else None)
+            get_layer_scale=assigner.get_scale if assigner is not None else None,
+            adapter_name_prefix='native_axis_adapter.',
+            adapter_lr_scale=args.labram_adapter_lr_scale,
+            adapter_weight_decay=args.labram_adapter_weight_decay)
         loss_scaler = NativeScaler()
 
     print("Use step level LR scheduler!")
@@ -697,7 +709,7 @@ def main(args, ds_init):
     # Test is evaluated only after model selection is complete. The primary
     # checkpoint is selected by validation kappa; validation BA is retained as
     # a sensitivity checkpoint without using test results for selection.
-    if data_loader_test is not None and data_loader_val is not None:
+    if not args.skip_final_test and data_loader_test is not None and data_loader_val is not None:
         eval_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
         def _evaluate_selected_checkpoint(filename, label):
             checkpoint_path = os.path.join(args.output_dir, filename)
@@ -735,6 +747,8 @@ def main(args, ds_init):
                     "sensitivity_validation_metric": sensitivity_metric,
                     "sensitivity_test": ba_test_stats,
                 }, f, indent=2)
+    elif args.skip_final_test:
+        print('Skipping final test evaluation (--skip_final_test).')
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

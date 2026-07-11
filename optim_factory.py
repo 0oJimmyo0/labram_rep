@@ -54,7 +54,9 @@ class LayerDecayValueAssigner(object):
         return get_num_layer_for_vit(var_name, len(self.values))
 
 
-def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=None, get_layer_scale=None, **kwargs):
+def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=None,
+                         get_layer_scale=None, adapter_name_prefix=None,
+                         adapter_lr_scale=1.0, adapter_weight_decay=None, **kwargs):
     parameter_group_names = {}
     parameter_group_vars = {}
 
@@ -69,33 +71,45 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                     flag = True
             if flag:
                 continue
+        is_adapter = bool(adapter_name_prefix and name.startswith(adapter_name_prefix))
         if param.ndim <= 1 or name.endswith(".bias") or name in skip_list: # param.ndim <= 1 len(param.shape) == 1
             group_name = "no_decay"
             this_weight_decay = 0.
         else:
             group_name = "decay"
             this_weight_decay = weight_decay
+            if is_adapter and adapter_weight_decay is not None:
+                this_weight_decay = adapter_weight_decay
         if get_num_layer is not None:
             layer_id = get_num_layer(name)
             group_name = "layer_%d_%s" % (layer_id, group_name)
         else:
             layer_id = None
 
+        if is_adapter:
+            group_name = "adapter_%s" % group_name
+
         if group_name not in parameter_group_names:
             if get_layer_scale is not None:
                 scale = get_layer_scale(layer_id)
             else:
                 scale = 1.
+            if is_adapter:
+                scale *= adapter_lr_scale
 
             parameter_group_names[group_name] = {
                 "weight_decay": this_weight_decay,
                 "params": [],
-                "lr_scale": scale
+                "lr_scale": scale,
+                "is_adapter": is_adapter,
+                "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
             }
             parameter_group_vars[group_name] = {
                 "weight_decay": this_weight_decay,
                 "params": [],
-                "lr_scale": scale
+                "lr_scale": scale,
+                "is_adapter": is_adapter,
+                "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
             }
 
         parameter_group_vars[group_name]["params"].append(param)
@@ -107,7 +121,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
 def create_optimizer(args, model, get_num_layer=None, get_layer_scale=None, filter_bias_and_bn=True, skip_list=None, **kwargs):
     opt_lower = args.opt.lower()
     weight_decay = args.weight_decay
-    if weight_decay and filter_bias_and_bn:
+    if (weight_decay or kwargs.get('adapter_weight_decay') is not None) and filter_bias_and_bn:
         skip = {}
         if skip_list is not None:
             skip = skip_list

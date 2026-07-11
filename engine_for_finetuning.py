@@ -51,6 +51,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('backbone_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('adapter_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
@@ -70,7 +72,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:
                     param_group["lr"] = lr_schedule_values[it] * param_group.get("lr_scale", 1.0)
-                if wd_schedule_values is not None and param_group["weight_decay"] > 0:
+                if (wd_schedule_values is not None and param_group["weight_decay"] > 0
+                        and not param_group.get("adapter_weight_decay_fixed", False)):
                     param_group["weight_decay"] = wd_schedule_values[it]
 
         samples = samples.float().to(device, non_blocking=True) / 100
@@ -139,12 +142,20 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(loss_scale=loss_scale_value)
         min_lr = 10.
         max_lr = 0.
+        backbone_max_lr = 0.
+        adapter_max_lr = 0.
         for group in optimizer.param_groups:
             min_lr = min(min_lr, group["lr"])
             max_lr = max(max_lr, group["lr"])
+            if group.get("is_adapter", False):
+                adapter_max_lr = max(adapter_max_lr, group["lr"])
+            else:
+                backbone_max_lr = max(backbone_max_lr, group["lr"])
 
         metric_logger.update(lr=max_lr)
         metric_logger.update(min_lr=min_lr)
+        metric_logger.update(backbone_lr=backbone_max_lr)
+        metric_logger.update(adapter_lr=adapter_max_lr)
         weight_decay_value = None
         for group in optimizer.param_groups:
             if group["weight_decay"] > 0:
@@ -161,6 +172,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.update(loss_scale=loss_scale_value, head="opt")
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
+            log_writer.update(backbone_lr=backbone_max_lr, head="opt")
+            log_writer.update(adapter_lr=adapter_max_lr, head="opt")
             log_writer.update(weight_decay=weight_decay_value, head="opt")
             log_writer.update(grad_norm=grad_norm, head="opt")
             for name, value in adapter_diagnostics.items():

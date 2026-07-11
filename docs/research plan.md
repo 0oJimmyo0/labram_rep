@@ -85,9 +85,28 @@ After selecting one structure and alpha, run a final multi-seed dense-versus-ada
 
 ### 5. Escalate only if needed
 
-If alpha calibration does not improve validation performance, test one fallback at a time:
+The paired confirmation showed that the original patch recipe is not yet
+reproducibly better: it wins seed `3407` but loses seeds `42` and `1024`.
+Therefore the seed-3407 improvement is a useful pilot signal, not a confirmed
+paper result.
 
-1. Adapter learning-rate multiplier `{1, 3, 10}` with all other settings fixed.
+The next bounded optimization phase is adapter-specific optimization. Keep the
+architecture fixed and test one factor at a time:
+
+1. Adapter LR scale `{0.1, 0.3, 1.0}` across global LR `{5e-4, 7e-4, 9e-4}`,
+   warmup `10`, on seeds `42` and `1024`.
+2. If needed, test identity-preserving alpha initialization `{0, 0.001, 0.01}`.
+3. If needed, test adapter weight decay `{0, 0.01, 0.05}`, then dropout
+   `{0, 0.1}` without combining both grids initially.
+
+Use validation-only jobs for development and do not inspect test results while
+choosing settings. If this bounded protocol does not produce a positive mean
+paired validation-kappa effect, report FACED as a boundary case and move on.
+
+Historical fallback options, only after the optimizer and initialization checks,
+are:
+
+1. A bottlenecked patch mixer with rank `{32, 64}`.
 2. Dense warm-start followed by near-identity adapter continuation.
 
 Do not combine learning-rate changes, depth gating, token MLP, larger bottlenecks, routing, and warm starts in one experiment.
@@ -98,4 +117,4 @@ Do not combine learning-rate changes, depth gating, token MLP, larger bottleneck
 - Depth-aware gating
 - Routing mechanisms
 - Larger adapter bottlenecks
-- Adapter learning-rate sweeps before alpha calibration
+- Bottleneck and warm-start fallbacks before the optimizer-control phase is complete
