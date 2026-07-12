@@ -42,6 +42,8 @@ LABRAM_ADAPTER_DEPTH_MODE="${LABRAM_ADAPTER_DEPTH_MODE:-none}"
 LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-4}"
 LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH="${LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH:-0}"
 SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-0}"
+FINETUNE_CHECKPOINT="${FINETUNE_CHECKPOINT:-./checkpoints/labram-base.pth}"
+EVAL_VALIDATION_ONLY="${EVAL_VALIDATION_ONLY:-0}"
 
 if ! awk -v lr="$LR" 'BEGIN { exit !(lr + 0 > 0) }'; then
   echo "LR must be a positive numeric value; got: $LR" >&2
@@ -93,6 +95,9 @@ fi
 if [[ "$SKIP_FINAL_TEST" == "1" ]]; then
   PYTHON_ARGS+=(--skip_final_test)
 fi
+if [[ "$EVAL_VALIDATION_ONLY" == "1" ]]; then
+  PYTHON_ARGS+=(--eval_validation_only)
+fi
 if [[ "$DETERMINISTIC" == "1" ]]; then
   export CUBLAS_WORKSPACE_CONFIG=":4096:8"
   PYTHON_ARGS+=(--deterministic)
@@ -102,7 +107,7 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --output_dir "$OUTPUT_DIR" \
   --log_dir "$LOG_DIR" \
   --model labram_base_patch200_200 \
-  --finetune ./checkpoints/labram-base.pth \
+  --finetune "$FINETUNE_CHECKPOINT" \
   --data_path "$DATA_DIR" \
   --weight_decay "$WEIGHT_DECAY" \
   --batch_size "$BATCH_SIZE" \

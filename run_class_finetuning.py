@@ -193,6 +193,8 @@ def get_args():
                         help='start epoch')
     parser.add_argument('--eval', action='store_true',
                         help='Perform evaluation only')
+    parser.add_argument('--eval_validation_only', action='store_true', default=False,
+                        help='Evaluate the validation split only, without test evaluation or training.')
     parser.add_argument('--dist_eval', action='store_true', default=False,
                         help='Enabling distributed evaluation')
     parser.add_argument('--num_workers', default=10, type=int)
@@ -632,6 +634,31 @@ def main(args, ds_init):
             accuracy.append(test_stats['accuracy'])
             balanced_accuracy.append(test_stats['balanced_accuracy'])
         print(f"======Accuracy: {np.mean(accuracy)} {np.std(accuracy)}, balanced accuracy: {np.mean(balanced_accuracy)} {np.std(balanced_accuracy)}")
+        exit(0)
+
+    if args.eval_validation_only:
+        if data_loader_val is None:
+            raise ValueError("Validation-only evaluation requested but no validation dataloader is available.")
+        val_stats = evaluate(
+            data_loader_val, model, device, header='Validation-only:', ch_names=ch_names,
+            metrics=metrics, is_binary=(args.nb_classes == 1))
+        def _eval_stat_value(stats, primary, fallback=None):
+            if primary in stats and stats[primary] is not None:
+                return float(stats[primary])
+            if fallback is not None and fallback in stats and stats[fallback] is not None:
+                return float(stats[fallback])
+            return float('nan')
+        print(
+            "Validation-only metrics: "
+            f"accuracy={_eval_stat_value(val_stats, 'accuracy'):.5f}, "
+            f"balanced_accuracy={_eval_stat_value(val_stats, 'balanced_accuracy', 'accuracy'):.5f}, "
+            f"cohen_kappa={_eval_stat_value(val_stats, 'cohen_kappa'):.5f}, "
+            f"f1_weighted={_eval_stat_value(val_stats, 'f1_weighted'):.5f}",
+            flush=True,
+        )
+        if args.output_dir and utils.is_main_process():
+            with open(os.path.join(args.output_dir, 'validation_only.json'), 'w', encoding='utf-8') as f:
+                json.dump(val_stats, f, indent=2)
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
