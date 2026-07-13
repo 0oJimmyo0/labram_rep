@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_DIR="/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM"
+REPO_DIR="${REPO_DIR:-/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM}"
 RUN_ID="${RUN_ID:-faced_labram_${LABRAM_ADAPTER_TYPE:-none}_seed${SEED:-1024}}"
 JOB_NAME="${JOB_NAME:-$RUN_ID}"
 

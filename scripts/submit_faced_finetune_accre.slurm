@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REPO_DIR="/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM"
+REPO_DIR="${REPO_DIR:-/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM}"
 ENV_DIR="/data/neurogroup/mingyangjiang/venvs/labram-accre"
 DATA_DIR="${DATA_DIR:-/data/neurogroup/mingyangjiang/data/FACED}"
 SEED="${SEED:-1024}"
