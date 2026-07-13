@@ -228,6 +228,8 @@ An initial validation-only screen was submitted from the isolated
 12509673 patch + lastk_attnres(k=4), seed 42
 12509672 patch + lastk_attnres(k=2), seed 1024
 12509670 patch + lastk_attnres(k=4), seed 1024
+12509800 patch + lastk_attnres(k=2), seed 3407
+12509801 patch + lastk_attnres(k=4), seed 3407
 ```
 
 This screen is useful for detecting gross instability and for checking whether

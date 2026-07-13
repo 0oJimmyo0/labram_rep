@@ -270,6 +270,8 @@ core/alpha LR scales `0.1`, alpha init `0.01`, and `epochs=80`:
 | `12509673` | `lastk_attnres`, k=4, seed 42 |
 | `12509672` | `lastk_attnres`, k=2, seed 1024 |
 | `12509670` | `lastk_attnres`, k=4, seed 1024 |
+| `12509800` | `lastk_attnres`, k=2, seed 3407 |
+| `12509801` | `lastk_attnres`, k=4, seed 3407 |
 
 These jobs are exploratory only. They do not replace the batch-size gate, and
 their validation metrics must not be used to justify depth unless the simple
