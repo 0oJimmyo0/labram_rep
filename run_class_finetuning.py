@@ -87,7 +87,7 @@ def get_args():
     parser.add_argument('--labram_adapter_use_token_mlp', action='store_true', default=False,
                         help='Enable optional token-wise MLP adapter branch. Disabled by default.')
     parser.add_argument('--labram_adapter_depth_mode', default='none',
-                        choices=['none', 'lastk_delta', 'lastk_attnres'],
+                        choices=['none', 'lastk_delta', 'lastk_attnres', 'lastk_uniform', 'lastk_attnres_v2'],
                         help='Optional depth-aware adapter mode. Disabled by default.')
     parser.add_argument('--labram_adapter_depth_k', default=4, type=int,
                         help='Number of final blocks used by the selected depth mode.')

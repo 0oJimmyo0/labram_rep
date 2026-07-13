@@ -72,6 +72,50 @@ def test_depth_weights_normalize_and_receive_gradient():
     assert adapter.depth_mix.grad.abs().sum() > 0
 
 
+def test_v2_starts_unblocked_and_uses_preceding_layers():
+    torch.manual_seed(31)
+    model = build("lastk_attnres_v2")
+    samples = torch.randn(2, 32, 2, 200)
+    logits = model(samples)
+    logits.square().mean().backward()
+
+    adapter = model.native_axis_adapter
+    weights = adapter._last_depth_weights
+    assert weights.shape == (2,)
+    assert torch.allclose(weights.sum(), torch.tensor(1.0), atol=1e-6)
+    assert adapter.depth_score.weight.grad is not None
+    assert adapter.depth_score.weight.grad.abs().sum() > 0
+    assert adapter.depth_beta.grad is not None
+    assert adapter.depth_beta.grad.abs().sum() > 0
+    assert adapter._last_depth_source_ratio > 0
+
+
+def test_uniform_depth_control_has_equal_weights():
+    torch.manual_seed(37)
+    model = build("lastk_uniform").eval()
+    samples = torch.randn(2, 32, 2, 200)
+    with torch.no_grad():
+        model(samples)
+    weights = model.native_axis_adapter._last_depth_weights
+    assert weights.shape == (2,)
+    assert torch.allclose(weights, torch.full_like(weights, 0.5), atol=1e-6)
+
+
+def test_zero_v2_beta_matches_patch_only():
+    torch.manual_seed(41)
+    patch_only = build("none").eval()
+    torch.manual_seed(41)
+    v2 = build("lastk_attnres_v2").eval()
+    v2.native_axis_adapter.depth_beta.data.zero_()
+    samples = torch.randn(2, 32, 2, 200)
+    with torch.no_grad():
+        patch_logits = patch_only(samples)
+        v2_logits = v2(samples)
+    # The zero beta path has identical shared parameters; the remaining tiny
+    # logit difference comes from evaluating the unused depth branch in float32.
+    assert (patch_logits - v2_logits).abs().max().item() <= 3e-6
+
+
 def test_legacy_delta_mode_still_forwards():
     torch.manual_seed(29)
     model = build("lastk_delta").eval()
@@ -84,6 +128,9 @@ def test_legacy_delta_mode_still_forwards():
 def main():
     test_zero_depth_mix_matches_patch_only()
     test_depth_weights_normalize_and_receive_gradient()
+    test_v2_starts_unblocked_and_uses_preceding_layers()
+    test_uniform_depth_control_has_equal_weights()
+    test_zero_v2_beta_matches_patch_only()
     print("depth adapter tests: PASS")
 
 
