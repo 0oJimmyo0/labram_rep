@@ -56,7 +56,17 @@ class LayerDecayValueAssigner(object):
 
 def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=None,
                          get_layer_scale=None, adapter_name_prefix=None,
-                         adapter_lr_scale=1.0, adapter_weight_decay=None, **kwargs):
+                         adapter_lr_scale=1.0, adapter_alpha_lr_scale=None,
+                         adapter_alpha_name_prefix=None, adapter_weight_decay=None, **kwargs):
+    if adapter_lr_scale < 0:
+        raise ValueError(f"adapter_lr_scale must be non-negative, got {adapter_lr_scale!r}")
+    if adapter_alpha_lr_scale is not None and adapter_alpha_lr_scale < 0:
+        raise ValueError(
+            f"adapter_alpha_lr_scale must be non-negative, got {adapter_alpha_lr_scale!r}"
+        )
+    if adapter_alpha_lr_scale is None:
+        adapter_alpha_lr_scale = adapter_lr_scale
+
     parameter_group_names = {}
     parameter_group_vars = {}
 
@@ -72,6 +82,9 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
             if flag:
                 continue
         is_adapter = bool(adapter_name_prefix and name.startswith(adapter_name_prefix))
+        is_adapter_alpha = bool(
+            is_adapter and adapter_alpha_name_prefix and name.startswith(adapter_alpha_name_prefix)
+        )
         if param.ndim <= 1 or name.endswith(".bias") or name in skip_list: # param.ndim <= 1 len(param.shape) == 1
             group_name = "no_decay"
             this_weight_decay = 0.
@@ -86,7 +99,9 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
         else:
             layer_id = None
 
-        if is_adapter:
+        if is_adapter_alpha:
+            group_name = "adapter_alpha_%s" % group_name
+        elif is_adapter:
             group_name = "adapter_%s" % group_name
 
         if group_name not in parameter_group_names:
@@ -94,7 +109,9 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 scale = get_layer_scale(layer_id)
             else:
                 scale = 1.
-            if is_adapter:
+            if is_adapter_alpha:
+                scale *= adapter_alpha_lr_scale
+            elif is_adapter:
                 scale *= adapter_lr_scale
 
             parameter_group_names[group_name] = {
@@ -102,6 +119,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 "params": [],
                 "lr_scale": scale,
                 "is_adapter": is_adapter,
+                "is_adapter_alpha": is_adapter_alpha,
                 "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
             }
             parameter_group_vars[group_name] = {
@@ -109,6 +127,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 "params": [],
                 "lr_scale": scale,
                 "is_adapter": is_adapter,
+                "is_adapter_alpha": is_adapter_alpha,
                 "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
             }
 

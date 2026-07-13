@@ -76,6 +76,10 @@ def get_args():
                         help='Scalar multiplier on the residual adapter correction.')
     parser.add_argument('--labram_adapter_lr_scale', default=1.0, type=float,
                         help='Multiplier on the effective LR for native_axis_adapter parameters.')
+    parser.add_argument('--labram_adapter_alpha_lr_scale', default=None, type=float,
+                        help='Multiplier on alpha_* LR; defaults to the adapter LR scale.')
+    parser.add_argument('--labram_adapter_fixed_alpha', default=None, type=float,
+                        help='Keep every enabled adapter alpha fixed at this value and exclude it from optimization.')
     parser.add_argument('--labram_adapter_weight_decay', default=None, type=float,
                         help='Weight decay for native_axis_adapter matrices; default inherits global weight decay.')
     parser.add_argument('--labram_adapter_seed', default=12345, type=int,
@@ -259,6 +263,7 @@ def get_models(args):
         adapter_depth_mode=args.labram_adapter_depth_mode,
         adapter_depth_k=args.labram_adapter_depth_k,
         adapter_gamma_zero_skip_branch=args.labram_adapter_gamma_zero_skip_branch,
+        adapter_fixed_alpha=args.labram_adapter_fixed_alpha,
     )
 
     return model
@@ -539,6 +544,8 @@ def main(args, ds_init):
             assigner.get_scale if assigner is not None else None,
             adapter_name_prefix='native_axis_adapter.',
             adapter_lr_scale=args.labram_adapter_lr_scale,
+            adapter_alpha_lr_scale=args.labram_adapter_alpha_lr_scale,
+            adapter_alpha_name_prefix='native_axis_adapter.alpha_',
             adapter_weight_decay=args.labram_adapter_weight_decay)
         model, optimizer, _, _ = ds_init(
             args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
@@ -557,6 +564,8 @@ def main(args, ds_init):
             get_layer_scale=assigner.get_scale if assigner is not None else None,
             adapter_name_prefix='native_axis_adapter.',
             adapter_lr_scale=args.labram_adapter_lr_scale,
+            adapter_alpha_lr_scale=args.labram_adapter_alpha_lr_scale,
+            adapter_alpha_name_prefix='native_axis_adapter.alpha_',
             adapter_weight_decay=args.labram_adapter_weight_decay)
         loss_scaler = NativeScaler()
 
@@ -602,6 +611,16 @@ def main(args, ds_init):
         'seed': int(args.seed),
         'adapter_type': args.labram_adapter_type,
         'adapter_lr_scale': float(args.labram_adapter_lr_scale),
+        'adapter_core_lr_scale': float(args.labram_adapter_lr_scale),
+        'adapter_alpha_lr_scale': float(
+            args.labram_adapter_lr_scale
+            if args.labram_adapter_alpha_lr_scale is None
+            else args.labram_adapter_alpha_lr_scale
+        ),
+        'adapter_fixed_alpha': (
+            None if args.labram_adapter_fixed_alpha is None
+            else float(args.labram_adapter_fixed_alpha)
+        ),
         'git_commit': git_commit,
         'output_dir': os.path.abspath(args.output_dir) if args.output_dir else '',
     }

@@ -277,6 +277,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
     ):
         super().__init__()
         self.depth_dim = int(depth_dim)
+        self._last_raw_patch_ratio = None
 
         if use_channel_mixer:
             self.channel_norm = nn.LayerNorm(dim)
@@ -331,6 +332,9 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             xp = self.patch_norm(xp)
             yp, _ = self.patch_attn(xp, xp, xp, need_weights=False)
             yp = yp.reshape(batch_size, channels, patches, dim)
+            self._last_raw_patch_ratio = float(
+                yp.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
+            )
             delta = delta + self.alpha_patch * yp
 
         if hasattr(self, "token_mlp"):
@@ -358,6 +362,7 @@ class NeuralTransformer(nn.Module):
                  adapter_seed=12345,
                  adapter_use_token_mlp=False, adapter_depth_mode="none",
                  adapter_depth_k=4, adapter_gamma_zero_skip_branch=False,
+                 adapter_fixed_alpha=None,
                  **kwargs):
         super().__init__()
         self.num_classes = num_classes
@@ -408,8 +413,10 @@ class NeuralTransformer(nn.Module):
         self.adapter_depth_mode = adapter_depth_mode
         self.adapter_depth_k = max(1, int(adapter_depth_k))
         self.adapter_gamma_zero_skip_branch = bool(adapter_gamma_zero_skip_branch)
+        self.adapter_fixed_alpha = None if adapter_fixed_alpha is None else float(adapter_fixed_alpha)
         self.native_axis_adapter = None
         self._adapter_last_delta_ratio = None
+        self._adapter_last_raw_patch_ratio = None
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=.02)
@@ -446,6 +453,11 @@ class NeuralTransformer(nn.Module):
                 if self.native_axis_adapter.depth_gate is not None:
                     nn.init.zeros_(self.native_axis_adapter.depth_gate[1].weight)
                     nn.init.zeros_(self.native_axis_adapter.depth_gate[1].bias)
+                if self.adapter_fixed_alpha is not None:
+                    for name, parameter in self.native_axis_adapter.named_parameters():
+                        if name.startswith("alpha_"):
+                            parameter.data.fill_(self.adapter_fixed_alpha)
+                            parameter.requires_grad_(False)
 
         if self.native_axis_adapter is not None:
             alpha_info = []
@@ -458,6 +470,7 @@ class NeuralTransformer(nn.Module):
                 f"type={self.adapter_type} gamma={self.adapter_gamma} "
                 f"token_mlp={bool(adapter_use_token_mlp)} "
                 f"depth_mode={self.adapter_depth_mode} depth_k={self.adapter_depth_k} "
+                f"fixed_alpha={self.adapter_fixed_alpha} "
                 f"{' '.join(alpha_info)}",
                 flush=True,
             )
@@ -499,11 +512,22 @@ class NeuralTransformer(nn.Module):
                 diagnostics[name] = float(getattr(self.native_axis_adapter, name).detach().cpu())
         if self._adapter_last_delta_ratio is not None:
             diagnostics["adapter_delta_ratio"] = self._adapter_last_delta_ratio
+        if self._adapter_last_raw_patch_ratio is not None:
+            diagnostics["raw_patch_ratio"] = self._adapter_last_raw_patch_ratio
         adapter_grad_sq = 0.0
-        for parameter in self.native_axis_adapter.parameters():
+        adapter_core_grad_sq = 0.0
+        alpha_grad_sq = 0.0
+        for name, parameter in self.native_axis_adapter.named_parameters():
             if parameter.grad is not None:
-                adapter_grad_sq += float(parameter.grad.detach().float().pow(2).sum().cpu())
+                grad_sq = float(parameter.grad.detach().float().pow(2).sum().cpu())
+                adapter_grad_sq += grad_sq
+                if name.startswith("alpha_"):
+                    alpha_grad_sq += grad_sq
+                else:
+                    adapter_core_grad_sq += grad_sq
         diagnostics["adapter_grad_norm"] = adapter_grad_sq ** 0.5
+        diagnostics["adapter_core_grad_norm"] = adapter_core_grad_sq ** 0.5
+        diagnostics["alpha_grad_norm"] = alpha_grad_sq ** 0.5
         last_block_grad_sq = 0.0
         for parameter in self.blocks[-1].parameters():
             if parameter.grad is not None:
@@ -622,6 +646,9 @@ class NeuralTransformer(nn.Module):
             depth_summary = torch.stack(depth_stats, dim=1).mean(dim=1) if depth_stats else None
             delta_grid = self.native_axis_adapter(token_grid, depth_summary=depth_summary)
             correction = self.adapter_gamma * delta_grid.reshape(batch_size, expected_tokens, -1)
+            self._adapter_last_raw_patch_ratio = getattr(
+                self.native_axis_adapter, "_last_raw_patch_ratio", None
+            )
             self._adapter_last_delta_ratio = float(
                 correction.detach().float().norm().div(patch_tokens.detach().float().norm().clamp_min(1e-12)).cpu()
             )

@@ -33,6 +33,31 @@ def train_class_batch(model, samples, target, criterion, ch_names):
     return loss, outputs
 
 
+def _snapshot_adapter_parameters(model):
+    core_model = model.module if hasattr(model, 'module') else model
+    return {
+        name: parameter.detach().clone()
+        for name, parameter in core_model.named_parameters()
+        if name.startswith('native_axis_adapter.') and parameter.requires_grad
+    }
+
+
+def _adapter_update_norms(model, snapshot):
+    core_model = model.module if hasattr(model, 'module') else model
+    current = dict(core_model.named_parameters())
+    core_sq = 0.0
+    alpha_sq = 0.0
+    for name, before in snapshot.items():
+        if name not in current:
+            continue
+        update_sq = float((current[name].detach() - before).float().pow(2).sum().cpu())
+        if name.startswith('native_axis_adapter.alpha_'):
+            alpha_sq += update_sq
+        else:
+            core_sq += update_sq
+    return core_sq ** 0.5, alpha_sq ** 0.5
+
+
 def get_loss_scale_for_deepspeed(model):
     optimizer = model.optimizer
     return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
@@ -53,6 +78,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('backbone_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('adapter_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('adapter_core_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('alpha_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
@@ -61,6 +88,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         model.micro_steps = 0
     else:
         optimizer.zero_grad()
+
+    adapter_step_snapshot = None
 
     for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
@@ -75,6 +104,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 if (wd_schedule_values is not None and param_group["weight_decay"] > 0
                         and not param_group.get("adapter_weight_decay_fixed", False)):
                     param_group["weight_decay"] = wd_schedule_values[it]
+
+        if loss_scaler is not None and data_iter_step % update_freq == 0:
+            adapter_step_snapshot = _snapshot_adapter_parameters(model)
 
         samples = samples.float().to(device, non_blocking=True) / 100
         samples = ensure_patch_tensor(samples, patch_size=200)
@@ -124,6 +156,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 # NativeScaler performs backward, unscaling, and optimizer.step,
                 # but it does not clear gradients. Capture them before zero_grad.
                 adapter_diagnostics = core_model.get_adapter_diagnostics()
+            if (data_iter_step + 1) % update_freq == 0 and adapter_step_snapshot is not None:
+                core_update_norm, alpha_update_norm = _adapter_update_norms(
+                    model, adapter_step_snapshot)
+                adapter_diagnostics['adapter_core_update_norm'] = core_update_norm
+                adapter_diagnostics['alpha_update_norm'] = alpha_update_norm
+                adapter_step_snapshot = None
             if (data_iter_step + 1) % update_freq == 0:
                 optimizer.zero_grad()
                 if model_ema is not None:
@@ -144,11 +182,17 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         max_lr = 0.
         backbone_max_lr = 0.
         adapter_max_lr = 0.
+        adapter_core_max_lr = 0.
+        alpha_max_lr = 0.
         for group in optimizer.param_groups:
             min_lr = min(min_lr, group["lr"])
             max_lr = max(max_lr, group["lr"])
             if group.get("is_adapter", False):
                 adapter_max_lr = max(adapter_max_lr, group["lr"])
+                if group.get("is_adapter_alpha", False):
+                    alpha_max_lr = max(alpha_max_lr, group["lr"])
+                else:
+                    adapter_core_max_lr = max(adapter_core_max_lr, group["lr"])
             else:
                 backbone_max_lr = max(backbone_max_lr, group["lr"])
 
@@ -156,6 +200,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.update(min_lr=min_lr)
         metric_logger.update(backbone_lr=backbone_max_lr)
         metric_logger.update(adapter_lr=adapter_max_lr)
+        metric_logger.update(adapter_core_lr=adapter_core_max_lr)
+        metric_logger.update(alpha_lr=alpha_max_lr)
         weight_decay_value = None
         for group in optimizer.param_groups:
             if group["weight_decay"] > 0:
@@ -174,6 +220,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.update(min_lr=min_lr, head="opt")
             log_writer.update(backbone_lr=backbone_max_lr, head="opt")
             log_writer.update(adapter_lr=adapter_max_lr, head="opt")
+            log_writer.update(adapter_core_lr=adapter_core_max_lr, head="opt")
+            log_writer.update(alpha_lr=alpha_max_lr, head="opt")
             log_writer.update(weight_decay=weight_decay_value, head="opt")
             log_writer.update(grad_norm=grad_norm, head="opt")
             for name, value in adapter_diagnostics.items():
