@@ -189,6 +189,11 @@ Submitted jobs:
 12509546 patch batch32 seed1024
 ```
 
+The patch jobs completed, but all four dense jobs failed before training because
+the launcher used `LABRAM_ADAPTER_TYPE=dense`; the valid native dense value is
+`none`. Rerun the dense half with the corrected value before making any
+batch-size or adapter-effect claim.
+
 ### Broader paper sequence
 
 After this one-time control, freeze the simple LaBraM-native patch structure and
@@ -236,3 +241,25 @@ This screen is useful for detecting gross instability and for checking whether
 the depth weights and residual diagnostics behave as designed overnight. It is
 not evidence of an adapter improvement by itself; the simple patch-versus-dense
 batch control remains the primary decision sequence.
+
+### Depth screen result
+
+All six depth jobs completed validation-only. The kappa-selected results were:
+
+```text
+k=2: seed42   kappa=0.39896 BA=0.46944 wF1=0.46587 epoch=75
+k=2: seed1024 kappa=0.40187 BA=0.47145 wF1=0.47094 epoch=72
+k=2: seed3407 kappa=0.39240 BA=0.46111 wF1=0.46251 epoch=52
+k=4: seed42   kappa=0.40804 BA=0.47762 wF1=0.47449 epoch=70
+k=4: seed1024 kappa=0.38692 BA=0.45833 wF1=0.45758 epoch=78
+k=4: seed3407 kappa=0.40076 BA=0.47130 wF1=0.46937 epoch=73
+```
+
+The matched simple patch batch-32 controls were kappa `0.40838` / BA `0.47793`
+/ weighted F1 `0.47712` for seed 42 and `0.40688` / `0.47670` / `0.47638`
+for seed 1024. Depth therefore has no consistent gain yet. Its depth weights
+remain close to uniform, although the depth mix and residual are nonzero. Do
+not select k or claim a paper-specific depth benefit from this screen. First
+correct and complete the dense control; then either freeze simple patch and
+move to cross-dataset validation, or run only a prespecified depth refinement
+if the corrected baseline comparison justifies it.

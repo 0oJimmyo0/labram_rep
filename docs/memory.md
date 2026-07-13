@@ -234,6 +234,12 @@ and run-organized logs:
 | `12509545` | dense, batch 32, seed 1024 |
 | `12509546` | patch, batch 32, seed 1024 |
 
+The four patch jobs completed successfully. The four dense jobs did not train:
+they passed `LABRAM_ADAPTER_TYPE=dense`, but the CLI uses `none` for the native
+dense path, so all four exited during argument parsing with an invalid-choice
+error. The batch-size comparison is therefore still incomplete and must be
+rerun with `LABRAM_ADAPTER_TYPE=none` before interpreting any adapter gain.
+
 ## Paper-Aligned Depth Candidate
 
 Because the current batch control must remain on commit `7ca74e2`, the depth
@@ -277,6 +283,30 @@ These jobs are exploratory only. They do not replace the batch-size gate, and
 their validation metrics must not be used to justify depth unless the simple
 patch recipe first proves reproducible against dense. Logs and checkpoints are
 organized under `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM-depth`.
+
+All six depth jobs completed successfully with validation-only evaluation. At
+the kappa-selected checkpoint, the results were:
+
+| Run | Best epoch | Kappa | BA | Weighted F1 |
+| --- | ---: | ---: | ---: | ---: |
+| k=2, seed 42 | 75 | 0.39896 | 0.46944 | 0.46587 |
+| k=2, seed 1024 | 72 | 0.40187 | 0.47145 | 0.47094 |
+| k=2, seed 3407 | 52 | 0.39240 | 0.46111 | 0.46251 |
+| k=4, seed 42 | 70 | 0.40804 | 0.47762 | 0.47449 |
+| k=4, seed 1024 | 78 | 0.38692 | 0.45833 | 0.45758 |
+| k=4, seed 3407 | 73 | 0.40076 | 0.47130 | 0.46937 |
+
+The matched simple patch batch-32 controls reached kappa `0.40838` / BA
+`0.47793` / weighted F1 `0.47712` on seed 42 and `0.40688` / `0.47670` /
+`0.47638` on seed 1024. Thus k=4 is nearly tied on seed 42 but lower on seed
+1024, while k=2 is lower on both. Seed 3407 is not uniformly favorable for
+depth: k=2 and k=4 reached kappa `0.39240` and `0.40076`, respectively.
+
+The depth selector is active but nearly uniform: k=2 has entropy about
+`0.693` and layer shares near `0.5/0.5`; k=4 has entropy about `1.386` and
+shares near `0.25` each. The learned depth mix remains nonzero, so the branch
+is functioning, but these runs do not yet show a useful selective depth
+preference or a reproducible FACED improvement.
 
 For later isolated submissions, use the run-organized wrapper from the depth
 worktree:
