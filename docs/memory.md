@@ -1,12 +1,12 @@
 # LaBraM Adapter Progress Memory
 
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
 ## Repository State
 
 - Repository: `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM`
 - Branch: `adaptor`
-- Current implementation commit: `eb9cd1b`
+- Current implementation commit: `7ca74e2` (`Add separate LaBraM alpha gate controls`)
 - FACED checkpoint SHA: `7c5058...37c`
 - Data root: `/data/neurogroup/mingyangjiang/data/FACED`
 - Logs: `logs/out/<RUN_ID>/` and `logs/err/<RUN_ID>/`
@@ -159,13 +159,125 @@ When adapter weight decay is explicitly supplied, it is held at that value rathe
 than overwritten by the global backbone WD schedule. With the new flags omitted,
 the previous optimizer behavior is preserved.
 
-The next optimization phase should keep patch-only, alpha `0.01`, warmup `10`,
-token MLP off, and depth mode `none`, then screen adapter LR scales `{0.1, 0.3,
-1.0}` against global LRs `{5e-4, 7e-4, 9e-4}` on development seeds `42` and
-`1024`. Use `--skip_final_test` during this phase and select only by validation
-kappa, with validation BA and weighted F1 as checks.
+The earlier plan to screen adapter LR scales `{0.1, 0.3, 1.0}` across several
+global LRs is superseded by the one-time batch-size control below. Do not start
+that larger adapter-scale sweep before the batch effect is resolved.
 
-Submit through the run-organized wrapper:
+## Decisive Batch-Size Control (2026-07-13)
+
+The latest logs changed the interpretation of Stage 3A. The exact new-code
+duplicate using the historical recipe (`batch_size=16`, `num_workers=0`,
+`lr=7e-4`, warmup `10`, patch alpha `0.01`, core and alpha scales `0.1`) matches
+the old Stage 2 seed-1024 epoch summaries exactly after elapsed-time fields are
+removed:
+
+- Best validation kappa: `0.37767`
+- Best validation BA: `0.44861`
+- Best validation weighted F1: `0.44759`
+- At the end of training, `alpha_patch` is about `0.0021` and the scaled residual
+  ratio is about `0.00016`.
+
+This reproduces the earlier adapter-collapse behavior. The Stage 3A alpha-scale
+`0.1` runs used `batch_size=32` and `num_workers=4`, which changed the number of
+optimizer steps per epoch and the warmup/cosine schedule. Their active residual
+therefore cannot yet be interpreted as evidence for separate alpha learning
+rates. The alpha-scale `0.3`, seed-42 retry completed without the old DataLoader
+worker crash, but remained below alpha-scale `0.1`:
+
+- Best validation kappa: `0.40334`
+- Best validation BA: `0.47299`
+- Best validation weighted F1: `0.47343`
+
+Nonfatal AMP `NaN or Inf found in input tensor` warnings still appear during
+early loss-scale warmup, but neither new job had a DataLoader worker,
+pickling, or segmentation-fault termination.
+
+### Current decisive control
+
+Run exactly eight validation-only jobs, with dense and patch-only crossed with
+batch sizes `16` and `32`, on seeds `42` and `1024`:
+
+```text
+global lr=7e-4
+warmup=10
+epochs=80
+workers=0
+weight_decay=0.05
+patch core lr scale=0.1
+alpha lr scale=0.1
+alpha init=0.01
+token MLP=false
+depth mode=none
+```
+
+Record both the best validation epoch and optimizer step. This is a one-time
+confound control, not a new batch-size research direction. If patch beats dense
+at batch 32 on both seeds, run seed `3407` and compare the three-seed mean
+against the strongest dense recipe. If dense and patch improve together, the
+earlier gain was primarily an optimization-regime effect. If patch remains
+inconsistent, treat FACED as a boundary case and move to the broader dataset
+study rather than expanding the FACED sweep.
+
+### Submitted overnight jobs
+
+The eight-job control was submitted with `NUM_WORKERS=0`, `SKIP_FINAL_TEST=1`,
+and run-organized logs:
+
+| Job | Condition |
+| ---: | --- |
+| `12509548` | dense, batch 16, seed 42 |
+| `12509550` | patch, batch 16, seed 42 |
+| `12509549` | dense, batch 32, seed 42 |
+| `12509552` | patch, batch 32, seed 42 |
+| `12509547` | dense, batch 16, seed 1024 |
+| `12509551` | patch, batch 16, seed 1024 |
+| `12509545` | dense, batch 32, seed 1024 |
+| `12509546` | patch, batch 32, seed 1024 |
+
+## Paper-Aligned Depth Candidate
+
+Because the current batch control must remain on commit `7ca74e2`, the depth
+refinement was developed in an isolated worktree at
+`/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM-depth` on branch
+`adaptor-depth`, commit `9807be4`.
+
+It adds `lastk_attnres` while preserving `none` and the legacy `lastk_delta`
+mode. The new mode:
+
+- collects the final `k` block representations on the `[C,S,D]` grid;
+- learns per-channel-patch soft weights across upper depth;
+- forms a depth-selected representation for the residual source;
+- starts with a zero-initialized depth mix, so it is exactly patch-only at
+  initialization;
+- logs per-layer depth weights, entropy, top-layer share, depth mix, and depth
+  gradients.
+
+The isolated tests pass compile, depth normalization/gradient checks, legacy
+`lastk_delta` forwarding, existing adapter controls, and gamma-zero parity with
+zero feature/logit difference. The candidate remains isolated and must not be
+merged into `adaptor` while the live batch control is running.
+
+### Exploratory depth screen
+
+Four validation-only jobs were submitted from the isolated `adaptor-depth`
+worktree at commit `de59a8e` (launcher fix on top of `9807be4`). They use the
+current patch recipe with batch size `32`, `num_workers=0`, global LR `7e-4`,
+core/alpha LR scales `0.1`, alpha init `0.01`, and `epochs=80`:
+
+| Job | Condition |
+| ---: | --- |
+| `12509671` | `lastk_attnres`, k=2, seed 42 |
+| `12509673` | `lastk_attnres`, k=4, seed 42 |
+| `12509672` | `lastk_attnres`, k=2, seed 1024 |
+| `12509670` | `lastk_attnres`, k=4, seed 1024 |
+
+These jobs are exploratory only. They do not replace the batch-size gate, and
+their validation metrics must not be used to justify depth unless the simple
+patch recipe first proves reproducible against dense. Logs and checkpoints are
+organized under `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM-depth`.
+
+For later isolated submissions, use the run-organized wrapper from the depth
+worktree:
 
 ```bash
 RUN_ID=faced_labram_patch_a003_seed3407 \\

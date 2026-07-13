@@ -118,3 +118,119 @@ Do not combine learning-rate changes, depth gating, token MLP, larger bottleneck
 - Routing mechanisms
 - Larger adapter bottlenecks
 - Bottleneck and warm-start fallbacks before the optimizer-control phase is complete
+
+## Revised Decision Gate (2026-07-13)
+
+The prior Stage 3A interpretation is superseded by a decisive batch-size
+control. The exact alpha-scale `0.1` duplicate at `batch_size=16` and
+`num_workers=0` reproduced the historical seed-1024 trajectory and ended with
+an almost inactive adapter (`alpha_patch` about `0.0021`, scaled residual ratio
+about `0.00016`). The earlier Stage 3A active residual was obtained with
+`batch_size=32` and `num_workers=4`, so it cannot yet be attributed to separate
+alpha learning rates.
+
+The alpha-scale `0.3` seed-42 retry completed successfully but was weaker than
+alpha-scale `0.1` (best validation kappa `0.40334`, BA `0.47299`, weighted F1
+`0.47343`). It is removed from the candidate set.
+
+### Overnight batch control
+
+Run only this eight-run matrix, validation-only:
+
+| Model | Batch size | Seeds |
+| --- | ---: | --- |
+| Dense | 16, 32 | 42, 1024 |
+| Patch-only | 16, 32 | 42, 1024 |
+
+Keep fixed:
+
+```text
+global_lr=7e-4
+warmup_epochs=10
+epochs=80
+num_workers=0
+weight_decay=0.05
+patch core lr scale=0.1
+alpha lr scale=0.1
+alpha init=0.01
+token_mlp=false
+depth_mode=none
+```
+
+For every run record the best validation-kappa epoch, optimizer step, BA,
+weighted F1, alpha, raw patch ratio, scaled residual ratio, and gradient
+diagnostics. Do not inspect or evaluate test performance during this gate.
+
+Interpretation:
+
+1. Patch beats dense at batch 32 on both seeds: treat batch 32 as a candidate
+   LaBraM recipe, run seed `3407`, then compare three-seed means against the
+   strongest dense recipe.
+2. Dense and patch improve together: attribute the earlier gain primarily to
+   optimization rather than the adapter and move to cross-dataset validation.
+3. Patch remains inconsistent: stop detailed FACED optimization and report
+   FACED as a boundary case rather than adding depth or more mechanisms.
+
+Only if batch 32 is adapter-favorable may we optionally compare
+`batch=32, update_freq=1` with `batch=16, update_freq=2` to separate literal
+microbatch effects from effective-batch and update-schedule effects. Do not run
+that follow-up otherwise.
+
+Submitted jobs:
+
+```text
+12509548 dense batch16 seed42
+12509550 patch batch16 seed42
+12509549 dense batch32 seed42
+12509552 patch batch32 seed42
+12509547 dense batch16 seed1024
+12509551 patch batch16 seed1024
+12509545 dense batch32 seed1024
+12509546 patch batch32 seed1024
+```
+
+### Broader paper sequence
+
+After this one-time control, freeze the simple LaBraM-native patch structure and
+move to SEED-V and TUEV, followed by ISRUC and PhysioNet-MI. Use the same dense
+and adapted preprocessing, splits, checkpoint-selection rule, and paired seeds.
+Use a small shared dense/adapter search (`global lr={5e-4,7e-4}`, batch size
+`{16,32}`) and a small adapter-scale search only when justified. Select by
+validation kappa, require BA and weighted F1 to remain compatible, and evaluate
+test only after the recipe is frozen.
+
+Do not add depth, routing, token MLP, or a larger bottleneck because of FACED
+alone. Once the simple adapter has reproducible support on multiple datasets,
+test `patch + lastk_delta` with `k={2,4}` as the paper-specific depth extension.
+
+The paper-aligned depth implementation is prepared but isolated in branch
+`adaptor-depth` at commit `9807be4`. It adds `lastk_attnres`, a LaBraM-native
+upper-depth soft aggregation over the `[C,S,D]` grid with a zero-initialized
+depth mix. It is ready for the later component ladder:
+
+```text
+Dense
+Patch-only
+Patch + lastk_attnres, k=2
+Patch + lastk_attnres, k=4
+```
+
+The depth conditions are currently exploratory rather than a decision gate. Do
+not merge them into `adaptor`, and do not use their results to select the final
+LaBraM recipe, until the current batch-size control establishes a stable simple
+patch recipe.
+
+An initial validation-only screen was submitted from the isolated
+`adaptor-depth` worktree at launcher commit `de59a8e`:
+
+```text
+12509671 patch + lastk_attnres(k=2), seed 42
+12509673 patch + lastk_attnres(k=4), seed 42
+12509672 patch + lastk_attnres(k=2), seed 1024
+12509670 patch + lastk_attnres(k=4), seed 1024
+```
+
+This screen is useful for detecting gross instability and for checking whether
+the depth weights and residual diagnostics behave as designed overnight. It is
+not evidence of an adapter improvement by itself; the simple patch-versus-dense
+batch control remains the primary decision sequence.
