@@ -691,7 +691,7 @@ class NeuralTransformer(nn.Module):
             diagnostics["alpha_depth_grad_norm"] = float(
                 0.0 if parameter.grad is None else parameter.grad.detach().float().norm().cpu()
             )
-        if hasattr(self.native_axis_adapter, "depth_gate"):
+        if hasattr(self.native_axis_adapter, "depth_gate") and self.native_axis_adapter.depth_gate is not None:
             gate_layer = self.native_axis_adapter.depth_gate
             if isinstance(gate_layer, nn.Sequential):
                 gate_layer = gate_layer[1]
