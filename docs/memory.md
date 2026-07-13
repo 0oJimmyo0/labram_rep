@@ -308,6 +308,40 @@ shares near `0.25` each. The learned depth mix remains nonzero, so the branch
 is functioning, but these runs do not yet show a useful selective depth
 preference or a reproducible FACED improvement.
 
+### Depth-v2 candidate
+
+The v1 result is negative but inconclusive because its zero-initialized query
+and zero-initialized mix block the query gradient initially, and its candidate
+pool includes the final representation. A bounded v2 is implemented locally on
+the `depth` branch at commit `cb339aa`:
+
+- `lastk_uniform`: fixed uniform average of the preceding `k` block outputs;
+- `lastk_attnres_v2`: learned scalar scoring over the preceding `k` outputs;
+- final block output remains the base `H_L` representation;
+- learned `depth_beta` starts at `0.05`, so the depth path is active but small;
+- v2 removes the extra `sqrt(D)` score division;
+- diagnostics add normalized entropy, min/max layer weight, depth beta, and
+  `||H_depth-H_L|| / ||H_L||`.
+
+The local v2 tests pass under the ACCRE virtualenv, including first-backward
+scorer/beta gradients, uniform weights, near-identity behavior, existing
+adapter controls, and exact gamma-zero parity. The v2 commit is not yet on
+GitHub because this shell currently lacks HTTPS push credentials.
+
+The next bounded depth screen is validation-only on seeds `42` and `1024`,
+batch size `32`, workers `0`, using the stable patch recipe:
+
+```text
+patch-only
+patch + lastk_uniform, k=2
+patch + lastk_attnres_v2, k=2
+patch + lastk_attnres_v2, k=4
+```
+
+Select by mean validation kappa, with BA and weighted F1 compatibility. Only
+then test the selected v2 condition on seed `3407`; do not use test metrics for
+this screen.
+
 For later isolated submissions, use the run-organized wrapper from the depth
 worktree:
 

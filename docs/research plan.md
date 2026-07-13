@@ -263,3 +263,38 @@ not select k or claim a paper-specific depth benefit from this screen. First
 correct and complete the dense control; then either freeze simple patch and
 move to cross-dataset validation, or run only a prespecified depth refinement
 if the corrected baseline comparison justifies it.
+
+### Depth-v2 bounded follow-up
+
+The v1 screen is negative but inconclusive. Its query and mixing gate both
+started at zero, so the query gradient was initially blocked; it also averaged
+over a pool containing the final representation and divided scores by
+`sqrt(embed_dim)`. These choices can explain the near-uniform weights without
+refuting the depth hypothesis.
+
+The isolated `depth` branch now contains commit `cb339aa`, which adds:
+
+```text
+lastk_uniform       fixed average of preceding upper-layer states
+lastk_attnres_v2    learned scalar attention over preceding upper-layer states
+```
+
+Both use `H_L + beta * (H_depth - H_L)` with `beta=0.05` at initialization;
+v2 uses direct normalized scalar scores and excludes `H_L` from the candidate
+pool. The local test suite passes, including first-backward gradients to the
+depth scorer and beta.
+
+Run only this validation-only ladder on seeds `42` and `1024`:
+
+```text
+Patch-only
+Patch + lastk_uniform, k=2
+Patch + lastk_attnres_v2, k=2
+Patch + lastk_attnres_v2, k=4
+```
+
+Advance learned depth only if it improves mean validation kappa over patch-only,
+keeps BA and weighted F1 compatible, and differs meaningfully from the uniform
+control. Then test the selected condition on seed `3407`. If v2 still fails,
+stop FACED depth tuning and move to the next dataset; interpret the result as
+dataset/backbone dependence rather than invalidating the paper's framework.
