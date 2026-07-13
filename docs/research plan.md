@@ -299,13 +299,11 @@ control. Then test the selected condition on seed `3407`. If v2 still fails,
 stop FACED depth tuning and move to the next dataset; interpret the result as
 dataset/backbone dependence rather than invalidating the paper's framework.
 
-### Submitted depth-only LR sweep
+### Canceled depth-only LR sweep record
 
-The 30-job full ladder was canceled because dense and patch-only results are
-already available from prior logs. Two jobs had started but were canceled before
-valid completion. The final depth-only validation sweep uses the corrected
-`depth` commit `956be37` and tests uniform k=2, learned v2 k=2, and learned v2
-k=4 across global LR `{5e-4, 7e-4, 9e-4}` and seeds `{42,1024}`:
+The matrix below is a historical record of the canceled 18-job proposal only.
+It produced no valid comparisons and must not be used. Dense and patch-only
+controls come from existing logs; the active replacement is recorded below.
 
 ```text
 5e-4: uniform 12516312/12516306, v2-k2 12516307/12516308, v2-k4 12516305/12516311
@@ -313,7 +311,25 @@ k=4 across global LR `{5e-4, 7e-4, 9e-4}` and seeds `{42,1024}`:
 9e-4: uniform 12516317/12516316, v2-k2 12516321/12516320, v2-k4 12516314/12516318
 ```
 
-IDs are ordered seed 42 / seed 1024. Reuse the existing dense and patch-only
-validation logs for the baseline comparison. Select by mean validation kappa,
-require BA and weighted F1 compatibility, and defer test evaluation until the
-recipe is frozen.
+These IDs are retained for auditability only. Do not select a recipe from this
+matrix or use its partial output.
+
+Correction: the 18-job sweep described above was canceled before producing
+valid results, so its matrix must not be used. Job `12516305` had started but
+was canceled before a valid result was written. The replacement is a four-job,
+validation-only seed-3407 behavior screen on depth commit `956be37`:
+
+```text
+12516380  patch + lastk_uniform, k=2
+12516377  patch + lastk_uniform, k=4
+12516379  patch + lastk_attnres_v2, k=2
+12516378  patch + lastk_attnres_v2, k=4
+```
+
+All use batch size `32`, workers `0`, warmup `10`, epochs `80`, global LR
+`7e-4`, patch alpha `0.01`, adapter/core LR scale `0.1`, alpha LR scale `0.1`,
+and skip final test evaluation. Reuse the existing seed-3407 patch-only log as
+the control. Compare validation kappa first, with BA and weighted F1 required
+to remain compatible, and inspect depth gradients, residual ratio, normalized
+entropy, and layer weights. If no condition improves the patch control without
+a metric or stability failure, stop FACED depth tuning.

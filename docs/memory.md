@@ -342,24 +342,36 @@ Select by mean validation kappa, with BA and weighted F1 compatibility. Only
 then test the selected v2 condition on seed `3407`; do not use test metrics for
 this screen.
 
-### Reduced depth-only LR sweep
+### Reduced seed-3407 depth validity screen
 
-The attempted 30-job dense/patch/depth ladder was canceled before producing
-valid new comparisons; existing dense and patch-only logs remain the controls.
-The final submitted sweep contains only depth conditions, all validation-only,
-using commit `956be37`, batch size `32`, workers `0`, warmup `10`, epochs `80`,
-global LR `{5e-4, 7e-4, 9e-4}`, adapter/core and alpha LR scales `0.1`, and
-seeds `42` and `1024`:
+The attempted 30-job dense/patch/depth ladder and the follow-up 18-job LR sweep
+were canceled before producing valid new comparisons. Job `12516305` had
+started but was canceled before a valid result was written. Existing dense and
+patch-only logs remain the controls; no canceled-job output is used.
 
-| LR | Uniform k=2 | V2 k=2 | V2 k=4 |
-| --- | --- | --- | --- |
-| `5e-4` | `12516312`/`12516306` | `12516307`/`12516308` | `12516305`/`12516311` |
-| `7e-4` | `12516309`/`12516310` | `12516313`/`12516315` | `12516322`/`12516319` |
-| `9e-4` | `12516317`/`12516316` | `12516321`/`12516320` | `12516314`/`12516318` |
+The replacement screen is intentionally only four validation-only jobs. It uses
+the corrected `depth` commit `956be37`, seed `3407`, batch size `32`, workers
+`0`, warmup `10`, epochs `80`, global LR `7e-4`, patch alpha `0.01`, and
+adapter/core and alpha LR scales `0.1`:
 
-Within each cell, job IDs are ordered `seed 42 / seed 1024`. Select the depth
-recipe using mean validation kappa, with BA and weighted F1 compatibility; do
-not evaluate test during this sweep.
+| Job | Condition |
+| --- | --- |
+| `12516380` | patch + uniform depth, k=2 |
+| `12516377` | patch + uniform depth, k=4 |
+| `12516379` | patch + learned depth-v2, k=2 |
+| `12516378` | patch + learned depth-v2, k=4 |
+
+This is a behavior and failure-mode check, not a hyperparameter selection
+study. Compare each run with the existing seed-3407 patch-only log using
+validation kappa as primary, with validation BA and weighted F1 as required
+compatibility metrics. Inspect `alpha_depth`, scorer gradients, depth-source
+ratio, normalized entropy, and layer weights. A depth condition is only a
+candidate for later paired confirmation if it improves the patch control
+without a major BA/F1 loss and shows nonzero, controlled depth activity.
+
+If all four conditions are neutral or worse, retain patch-only and stop FACED
+depth tuning. If one is clearly promising, rerun only that condition on the
+difficult seeds before any test evaluation or cross-dataset claim.
 
 For later isolated submissions, use the run-organized wrapper from the depth
 worktree:
