@@ -298,3 +298,22 @@ keeps BA and weighted F1 compatible, and differs meaningfully from the uniform
 control. Then test the selected condition on seed `3407`. If v2 still fails,
 stop FACED depth tuning and move to the next dataset; interpret the result as
 dataset/backbone dependence rather than invalidating the paper's framework.
+
+### Submitted depth-only LR sweep
+
+The 30-job full ladder was canceled because dense and patch-only results are
+already available from prior logs. Two jobs had started but were canceled before
+valid completion. The final depth-only validation sweep uses the corrected
+`depth` commit `956be37` and tests uniform k=2, learned v2 k=2, and learned v2
+k=4 across global LR `{5e-4, 7e-4, 9e-4}` and seeds `{42,1024}`:
+
+```text
+5e-4: uniform 12516312/12516306, v2-k2 12516307/12516308, v2-k4 12516305/12516311
+7e-4: uniform 12516309/12516310, v2-k2 12516313/12516315, v2-k4 12516322/12516319
+9e-4: uniform 12516317/12516316, v2-k2 12516321/12516320, v2-k4 12516314/12516318
+```
+
+IDs are ordered seed 42 / seed 1024. Reuse the existing dense and patch-only
+validation logs for the baseline comparison. Select by mean validation kappa,
+require BA and weighted F1 compatibility, and defer test evaluation until the
+recipe is frozen.

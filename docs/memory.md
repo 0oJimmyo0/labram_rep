@@ -342,6 +342,25 @@ Select by mean validation kappa, with BA and weighted F1 compatibility. Only
 then test the selected v2 condition on seed `3407`; do not use test metrics for
 this screen.
 
+### Reduced depth-only LR sweep
+
+The attempted 30-job dense/patch/depth ladder was canceled before producing
+valid new comparisons; existing dense and patch-only logs remain the controls.
+The final submitted sweep contains only depth conditions, all validation-only,
+using commit `956be37`, batch size `32`, workers `0`, warmup `10`, epochs `80`,
+global LR `{5e-4, 7e-4, 9e-4}`, adapter/core and alpha LR scales `0.1`, and
+seeds `42` and `1024`:
+
+| LR | Uniform k=2 | V2 k=2 | V2 k=4 |
+| --- | --- | --- | --- |
+| `5e-4` | `12516312`/`12516306` | `12516307`/`12516308` | `12516305`/`12516311` |
+| `7e-4` | `12516309`/`12516310` | `12516313`/`12516315` | `12516322`/`12516319` |
+| `9e-4` | `12516317`/`12516316` | `12516321`/`12516320` | `12516314`/`12516318` |
+
+Within each cell, job IDs are ordered `seed 42 / seed 1024`. Select the depth
+recipe using mean validation kappa, with BA and weighted F1 compatibility; do
+not evaluate test during this sweep.
+
 For later isolated submissions, use the run-organized wrapper from the depth
 worktree:
 
