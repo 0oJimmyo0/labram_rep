@@ -274,10 +274,15 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         use_patch_mixer=True,
         use_token_mlp=False,
         depth_dim=0,
+        depth_mode="none",
     ):
         super().__init__()
         self.depth_dim = int(depth_dim)
+        self.depth_mode = str(depth_mode).strip().lower()
         self._last_raw_patch_ratio = None
+        self._last_depth_weights = None
+        self._last_depth_weight_entropy = None
+        self._last_depth_top_layer_share = None
 
         if use_channel_mixer:
             self.channel_norm = nn.LayerNorm(dim)
@@ -302,7 +307,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             )
             self.alpha_token = nn.Parameter(torch.tensor(float(init_alpha)))
 
-        if self.depth_dim > 0:
+        if self.depth_dim > 0 and self.depth_mode == "lastk_delta":
             self.depth_gate = nn.Sequential(
                 nn.LayerNorm(self.depth_dim),
                 nn.Linear(self.depth_dim, dim),
@@ -313,32 +318,59 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         else:
             self.depth_gate = None
 
-    def forward(self, x, depth_summary=None):
+        if self.depth_dim > 0 and self.depth_mode == "lastk_attnres":
+            self.depth_norm = nn.LayerNorm(dim)
+            self.depth_query = nn.Parameter(torch.zeros(dim))
+            # Start from the ordinary patch residual and let depth earn its effect.
+            self.depth_mix = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x, depth_summary=None, depth_tokens=None):
         if x.dim() != 4:
             raise ValueError(f"Expected [B,C,S,D], got {tuple(x.shape)}")
 
         batch_size, channels, patches, dim = x.shape
         delta = torch.zeros_like(x)
+        source = x
+
+        if self.depth_mode == "lastk_attnres":
+            if depth_tokens is None or depth_tokens.dim() != 5:
+                raise ValueError("lastk_attnres requires depth_tokens with shape [B,K,C,S,D]")
+            if depth_tokens.shape[0] != batch_size or depth_tokens.shape[2:] != (channels, patches, dim):
+                raise ValueError(
+                    "Expected depth_tokens shape [B,K,C,S,D] matching the adapter input, "
+                    f"got {tuple(depth_tokens.shape)} for input {tuple(x.shape)}"
+                )
+            normalized_depth = self.depth_norm(depth_tokens)
+            scores = torch.einsum("bkcsd,d->bkcs", normalized_depth, self.depth_query)
+            weights = torch.softmax(scores / math.sqrt(dim), dim=1)
+            depth_selected = torch.einsum("bkcs,bkcsd->bcsd", weights, depth_tokens)
+            depth_mix = torch.tanh(self.depth_mix)
+            source = x + depth_mix * (depth_selected - x)
+            self._last_depth_weights = weights.detach().float().mean(dim=(0, 2, 3))
+            self._last_depth_weight_entropy = float(
+                (-weights * weights.clamp_min(1e-12).log()).sum(dim=1).mean().detach().float().cpu()
+            )
+            self._last_depth_top_layer_share = float(weights[:, -1].mean().detach().float().cpu())
 
         if hasattr(self, "channel_attn"):
-            xc = x.permute(0, 2, 1, 3).reshape(batch_size * patches, channels, dim)
+            xc = source.permute(0, 2, 1, 3).reshape(batch_size * patches, channels, dim)
             xc = self.channel_norm(xc)
             yc, _ = self.channel_attn(xc, xc, xc, need_weights=False)
             yc = yc.reshape(batch_size, patches, channels, dim).permute(0, 2, 1, 3)
             delta = delta + self.alpha_channel * yc
 
         if hasattr(self, "patch_attn"):
-            xp = x.reshape(batch_size * channels, patches, dim)
+            xp = source.reshape(batch_size * channels, patches, dim)
             xp = self.patch_norm(xp)
             yp, _ = self.patch_attn(xp, xp, xp, need_weights=False)
             yp = yp.reshape(batch_size, channels, patches, dim)
             self._last_raw_patch_ratio = float(
-                yp.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
+                yp.detach().float().norm().div(source.detach().float().norm().clamp_min(1e-12)).cpu()
             )
             delta = delta + self.alpha_patch * yp
 
         if hasattr(self, "token_mlp"):
-            delta = delta + self.alpha_token * self.token_mlp(self.token_norm(x))
+            delta = delta + self.alpha_token * self.token_mlp(self.token_norm(source))
 
         if self.depth_gate is not None and depth_summary is not None:
             if depth_summary.dim() != 2 or depth_summary.shape[0] != batch_size:
@@ -405,8 +437,10 @@ class NeuralTransformer(nn.Module):
                 f"got {adapter_type!r}"
             )
         adapter_depth_mode = str(adapter_depth_mode).strip().lower()
-        if adapter_depth_mode not in {"none", "lastk_delta"}:
-            raise ValueError("adapter_depth_mode must be 'none' or 'lastk_delta'")
+        if adapter_depth_mode not in {"none", "lastk_delta", "lastk_attnres"}:
+            raise ValueError(
+                "adapter_depth_mode must be 'none', 'lastk_delta', or 'lastk_attnres'"
+            )
         self.adapter_type = adapter_type
         self.adapter_gamma = float(adapter_gamma)
         self.adapter_seed = int(adapter_seed)
@@ -448,6 +482,7 @@ class NeuralTransformer(nn.Module):
                     use_patch_mixer=self.adapter_type in {"patch", "channel_patch"},
                     use_token_mlp=adapter_use_token_mlp,
                     depth_dim=embed_dim if self.adapter_depth_mode != "none" else 0,
+                    depth_mode=self.adapter_depth_mode,
                 )
                 self.native_axis_adapter.apply(self._init_weights)
                 if self.native_axis_adapter.depth_gate is not None:
@@ -514,6 +549,15 @@ class NeuralTransformer(nn.Module):
             diagnostics["adapter_delta_ratio"] = self._adapter_last_delta_ratio
         if self._adapter_last_raw_patch_ratio is not None:
             diagnostics["raw_patch_ratio"] = self._adapter_last_raw_patch_ratio
+        if hasattr(self.native_axis_adapter, "depth_mix"):
+            diagnostics["depth_mix"] = float(
+                torch.tanh(self.native_axis_adapter.depth_mix).detach().cpu()
+            )
+        if self.native_axis_adapter._last_depth_weights is not None:
+            for index, value in enumerate(self.native_axis_adapter._last_depth_weights.tolist()):
+                diagnostics[f"depth_weight_{index}"] = float(value)
+            diagnostics["depth_weight_entropy"] = self.native_axis_adapter._last_depth_weight_entropy
+            diagnostics["depth_top_layer_share"] = self.native_axis_adapter._last_depth_top_layer_share
         adapter_grad_sq = 0.0
         adapter_core_grad_sq = 0.0
         alpha_grad_sq = 0.0
@@ -627,12 +671,19 @@ class NeuralTransformer(nn.Module):
         x = self.pos_drop(x)
 
         depth_stats = []
-        use_depth = self.adapter_depth_mode == "lastk_delta"
+        depth_states = []
+        use_delta_depth = self.adapter_depth_mode == "lastk_delta"
+        use_attnres_depth = self.adapter_depth_mode == "lastk_attnres"
         start_idx = max(0, len(self.blocks) - self.adapter_depth_k)
         for idx, blk in enumerate(self.blocks):
             prev_x = x
             x = blk(x, rel_pos_bias=None)
-            if use_depth and idx >= start_idx:
+            if (use_delta_depth or use_attnres_depth) and idx >= start_idx:
+                if use_attnres_depth:
+                    depth_states.append(
+                        x[:, 1:, :].reshape(batch_size, n, input_time_window, -1)
+                    )
+            if use_delta_depth and idx >= start_idx:
                 depth_stats.append((x[:, 1:, :] - prev_x[:, 1:, :]).mean(dim=1))
 
         patch_tokens = x[:, 1:, :]
@@ -644,7 +695,12 @@ class NeuralTransformer(nn.Module):
         if not (self.adapter_gamma_zero_skip_branch and abs(self.adapter_gamma) == 0.0):
             token_grid = patch_tokens.reshape(batch_size, n, input_time_window, patch_tokens.shape[-1])
             depth_summary = torch.stack(depth_stats, dim=1).mean(dim=1) if depth_stats else None
-            delta_grid = self.native_axis_adapter(token_grid, depth_summary=depth_summary)
+            depth_tokens = torch.stack(depth_states, dim=1) if depth_states else None
+            delta_grid = self.native_axis_adapter(
+                token_grid,
+                depth_summary=depth_summary,
+                depth_tokens=depth_tokens,
+            )
             correction = self.adapter_gamma * delta_grid.reshape(batch_size, expected_tokens, -1)
             self._adapter_last_raw_patch_ratio = getattr(
                 self.native_axis_adapter, "_last_raw_patch_ratio", None
