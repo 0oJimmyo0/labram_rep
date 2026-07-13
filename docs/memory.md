@@ -318,7 +318,7 @@ the `depth` branch at commit `cb339aa`:
 - `lastk_uniform`: fixed uniform average of the preceding `k` block outputs;
 - `lastk_attnres_v2`: learned scalar scoring over the preceding `k` outputs;
 - final block output remains the base `H_L` representation;
-- learned `depth_beta` starts at `0.05`, so the depth path is active but small;
+- learned `alpha_depth` starts at `0.05`, so the depth path is active but small;
 - v2 removes the extra `sqrt(D)` score division;
 - diagnostics add normalized entropy, min/max layer weight, depth beta, and
   `||H_depth-H_L|| / ||H_L||`.
