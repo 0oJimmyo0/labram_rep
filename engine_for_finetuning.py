@@ -47,15 +47,18 @@ def _adapter_update_norms(model, snapshot):
     current = dict(core_model.named_parameters())
     core_sq = 0.0
     alpha_sq = 0.0
+    alpha_depth_sq = 0.0
     for name, before in snapshot.items():
         if name not in current:
             continue
         update_sq = float((current[name].detach() - before).float().pow(2).sum().cpu())
         if name.startswith('native_axis_adapter.alpha_'):
             alpha_sq += update_sq
+            if name == 'native_axis_adapter.alpha_depth':
+                alpha_depth_sq += update_sq
         else:
             core_sq += update_sq
-    return core_sq ** 0.5, alpha_sq ** 0.5
+    return core_sq ** 0.5, alpha_sq ** 0.5, alpha_depth_sq ** 0.5
 
 
 def get_loss_scale_for_deepspeed(model):
@@ -157,10 +160,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 # but it does not clear gradients. Capture them before zero_grad.
                 adapter_diagnostics = core_model.get_adapter_diagnostics()
             if (data_iter_step + 1) % update_freq == 0 and adapter_step_snapshot is not None:
-                core_update_norm, alpha_update_norm = _adapter_update_norms(
+                core_update_norm, alpha_update_norm, alpha_depth_update_norm = _adapter_update_norms(
                     model, adapter_step_snapshot)
                 adapter_diagnostics['adapter_core_update_norm'] = core_update_norm
                 adapter_diagnostics['alpha_update_norm'] = alpha_update_norm
+                adapter_diagnostics['alpha_depth_update_norm'] = alpha_depth_update_norm
                 adapter_step_snapshot = None
             if (data_iter_step + 1) % update_freq == 0:
                 optimizer.zero_grad()

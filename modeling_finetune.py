@@ -326,11 +326,11 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             self.depth_mix = nn.Parameter(torch.zeros(1))
 
         if self.depth_dim > 0 and self.depth_mode == "lastk_uniform":
-            self.depth_beta = nn.Parameter(torch.tensor(0.05))
+            self.alpha_depth = nn.Parameter(torch.tensor(0.05))
 
         if self.depth_dim > 0 and self.depth_mode == "lastk_attnres_v2":
             self.depth_norm = nn.LayerNorm(dim)
-            self.depth_beta = nn.Parameter(torch.tensor(0.05))
+            self.alpha_depth = nn.Parameter(torch.tensor(0.05))
             self.depth_score = nn.Linear(dim, 1, bias=False)
 
     def forward(self, x, depth_summary=None, depth_tokens=None):
@@ -368,7 +368,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
                 depth_mix = torch.tanh(self.depth_mix)
                 source = x + depth_mix * (depth_selected - x)
             else:
-                source = x + self.depth_beta * (depth_selected - x)
+                source = x + self.alpha_depth * (depth_selected - x)
             self._last_depth_weights = weights.detach().float().mean(dim=(0, 2, 3))
             self._last_depth_weight_entropy = float(
                 (-weights * weights.clamp_min(1e-12).log()).sum(dim=1).mean().detach().float().cpu()
@@ -481,6 +481,7 @@ class NeuralTransformer(nn.Module):
         self.native_axis_adapter = None
         self._adapter_last_delta_ratio = None
         self._adapter_last_raw_patch_ratio = None
+        self._adapter_last_depth_candidate_indices = None
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=.02)
@@ -526,7 +527,7 @@ class NeuralTransformer(nn.Module):
 
         if self.native_axis_adapter is not None:
             alpha_info = []
-            for name in ("alpha_channel", "alpha_patch", "alpha_token"):
+            for name in ("alpha_channel", "alpha_patch", "alpha_token", "alpha_depth"):
                 if hasattr(self.native_axis_adapter, name):
                     value = float(getattr(self.native_axis_adapter, name).detach().cpu())
                     alpha_info.append(f"{name}={value:.6g}")
@@ -583,9 +584,9 @@ class NeuralTransformer(nn.Module):
             diagnostics["depth_mix"] = float(
                 torch.tanh(self.native_axis_adapter.depth_mix).detach().cpu()
             )
-        if hasattr(self.native_axis_adapter, "depth_beta"):
-            diagnostics["depth_beta"] = float(
-                self.native_axis_adapter.depth_beta.detach().cpu()
+        if hasattr(self.native_axis_adapter, "alpha_depth"):
+            diagnostics["alpha_depth"] = float(
+                self.native_axis_adapter.alpha_depth.detach().cpu()
             )
         if self.native_axis_adapter._last_depth_source_ratio is not None:
             diagnostics["depth_source_ratio"] = self.native_axis_adapter._last_depth_source_ratio
@@ -614,6 +615,11 @@ class NeuralTransformer(nn.Module):
         diagnostics["adapter_grad_norm"] = adapter_grad_sq ** 0.5
         diagnostics["adapter_core_grad_norm"] = adapter_core_grad_sq ** 0.5
         diagnostics["alpha_grad_norm"] = alpha_grad_sq ** 0.5
+        if hasattr(self.native_axis_adapter, "alpha_depth"):
+            parameter = self.native_axis_adapter.alpha_depth
+            diagnostics["alpha_depth_grad_norm"] = float(
+                0.0 if parameter.grad is None else parameter.grad.detach().float().norm().cpu()
+            )
         last_block_grad_sq = 0.0
         for parameter in self.blocks[-1].parameters():
             if parameter.grad is not None:
@@ -720,6 +726,12 @@ class NeuralTransformer(nn.Module):
         use_attnres_depth_v2 = self.adapter_depth_mode == "lastk_attnres_v2"
         start_idx = max(0, len(self.blocks) - self.adapter_depth_k)
         preceding_start_idx = max(0, len(self.blocks) - self.adapter_depth_k - 1)
+        if use_uniform_depth or use_attnres_depth_v2:
+            self._adapter_last_depth_candidate_indices = list(
+                range(preceding_start_idx, len(self.blocks) - 1)
+            )
+        else:
+            self._adapter_last_depth_candidate_indices = None
         for idx, blk in enumerate(self.blocks):
             prev_x = x
             x = blk(x, rel_pos_bias=None)

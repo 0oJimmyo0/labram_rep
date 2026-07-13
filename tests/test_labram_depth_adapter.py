@@ -82,11 +82,13 @@ def test_v2_starts_unblocked_and_uses_preceding_layers():
     adapter = model.native_axis_adapter
     weights = adapter._last_depth_weights
     assert weights.shape == (2,)
+    assert model._adapter_last_depth_candidate_indices == [1, 2]
+    assert model._adapter_last_depth_candidate_indices[-1] < len(model.blocks) - 1
     assert torch.allclose(weights.sum(), torch.tensor(1.0), atol=1e-6)
     assert adapter.depth_score.weight.grad is not None
     assert adapter.depth_score.weight.grad.abs().sum() > 0
-    assert adapter.depth_beta.grad is not None
-    assert adapter.depth_beta.grad.abs().sum() > 0
+    assert adapter.alpha_depth.grad is not None
+    assert adapter.alpha_depth.grad.abs().sum() > 0
     assert adapter._last_depth_source_ratio > 0
 
 
@@ -106,7 +108,7 @@ def test_zero_v2_beta_matches_patch_only():
     patch_only = build("none").eval()
     torch.manual_seed(41)
     v2 = build("lastk_attnres_v2").eval()
-    v2.native_axis_adapter.depth_beta.data.zero_()
+    v2.native_axis_adapter.alpha_depth.data.zero_()
     samples = torch.randn(2, 32, 2, 200)
     with torch.no_grad():
         patch_logits = patch_only(samples)
