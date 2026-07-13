@@ -16,6 +16,7 @@ class _DummyAdapterModel(torch.nn.Module):
         self.native_axis_adapter.alpha_patch = torch.nn.Parameter(torch.tensor(0.01))
         self.native_axis_adapter.alpha_depth = torch.nn.Parameter(torch.tensor(0.05))
         self.native_axis_adapter.depth_score = torch.nn.Linear(3, 1, bias=False)
+        self.native_axis_adapter.depth_gate = torch.nn.Linear(3, 1, bias=False)
 
 
 def test_alpha_parameters_get_a_separate_lr_group():
@@ -26,6 +27,8 @@ def test_alpha_parameters_get_a_separate_lr_group():
         adapter_alpha_name_prefix="native_axis_adapter.alpha_",
         adapter_lr_scale=0.1,
         adapter_alpha_lr_scale=1.0,
+        adapter_gate_name_prefix="native_axis_adapter.depth_gate.",
+        adapter_gate_lr_scale=1.0,
     )
     assert any(
         group.get("is_adapter_alpha") and group["lr_scale"] == 1.0
@@ -47,6 +50,13 @@ def test_alpha_parameters_get_a_separate_lr_group():
         any(parameter is model.native_axis_adapter.depth_score.weight for parameter in group["params"])
         and group.get("is_adapter") and not group.get("is_adapter_alpha")
         and group["lr_scale"] == 0.1
+        for group in groups
+    )
+    assert any(
+        any(parameter is model.native_axis_adapter.depth_gate.weight for parameter in group["params"])
+        and group.get("is_adapter_gate")
+        and group["lr_scale"] == 1.0
+        and group["weight_decay"] == 0.0
         for group in groups
     )
 

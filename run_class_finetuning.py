@@ -78,6 +78,8 @@ def get_args():
                         help='Multiplier on the effective LR for native_axis_adapter parameters.')
     parser.add_argument('--labram_adapter_alpha_lr_scale', default=None, type=float,
                         help='Multiplier on alpha_* LR; defaults to the adapter LR scale.')
+    parser.add_argument('--labram_adapter_gate_lr_scale', default=None, type=float,
+                        help='Multiplier on depth-gate LR; defaults to alpha LR scale.')
     parser.add_argument('--labram_adapter_fixed_alpha', default=None, type=float,
                         help='Keep every enabled adapter alpha fixed at this value and exclude it from optimization.')
     parser.add_argument('--labram_adapter_weight_decay', default=None, type=float,
@@ -87,7 +89,8 @@ def get_args():
     parser.add_argument('--labram_adapter_use_token_mlp', action='store_true', default=False,
                         help='Enable optional token-wise MLP adapter branch. Disabled by default.')
     parser.add_argument('--labram_adapter_depth_mode', default='none',
-                        choices=['none', 'lastk_delta', 'lastk_attnres', 'lastk_uniform', 'lastk_attnres_v2'],
+                        choices=['none', 'lastk_delta', 'lastk_attnres', 'lastk_uniform', 'lastk_attnres_v2',
+                                 'lastk_delta_gate_uniform', 'lastk_delta_gate'],
                         help='Optional depth-aware adapter mode. Disabled by default.')
     parser.add_argument('--labram_adapter_depth_k', default=4, type=int,
                         help='Number of final blocks used by the selected depth mode.')
@@ -546,6 +549,8 @@ def main(args, ds_init):
             adapter_lr_scale=args.labram_adapter_lr_scale,
             adapter_alpha_lr_scale=args.labram_adapter_alpha_lr_scale,
             adapter_alpha_name_prefix='native_axis_adapter.alpha_',
+            adapter_gate_lr_scale=args.labram_adapter_gate_lr_scale,
+            adapter_gate_name_prefix='native_axis_adapter.depth_gate.',
             adapter_weight_decay=args.labram_adapter_weight_decay)
         model, optimizer, _, _ = ds_init(
             args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
@@ -566,6 +571,8 @@ def main(args, ds_init):
             adapter_lr_scale=args.labram_adapter_lr_scale,
             adapter_alpha_lr_scale=args.labram_adapter_alpha_lr_scale,
             adapter_alpha_name_prefix='native_axis_adapter.alpha_',
+            adapter_gate_lr_scale=args.labram_adapter_gate_lr_scale,
+            adapter_gate_name_prefix='native_axis_adapter.depth_gate.',
             adapter_weight_decay=args.labram_adapter_weight_decay)
         loss_scaler = NativeScaler()
 
@@ -616,6 +623,14 @@ def main(args, ds_init):
             args.labram_adapter_lr_scale
             if args.labram_adapter_alpha_lr_scale is None
             else args.labram_adapter_alpha_lr_scale
+        ),
+        'adapter_gate_lr_scale': float(
+            args.labram_adapter_alpha_lr_scale
+            if args.labram_adapter_gate_lr_scale is None
+            and args.labram_adapter_alpha_lr_scale is not None
+            else args.labram_adapter_lr_scale
+            if args.labram_adapter_gate_lr_scale is None
+            else args.labram_adapter_gate_lr_scale
         ),
         'adapter_fixed_alpha': (
             None if args.labram_adapter_fixed_alpha is None

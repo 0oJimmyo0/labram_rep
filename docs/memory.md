@@ -188,3 +188,40 @@ Inspect final metrics:
 cat checkpoints/RUN_ID/final_test.json
 tail -5 checkpoints/RUN_ID/log.txt
 ```
+
+## Depth-Conditioned Residual Gate
+
+The direct-fusion depth screen on commit `956be37` was negative on seed `3407`:
+uniform k=2 was closest to patch-only, while learned v2 and k=4 were worse.
+This argues against replacing the final LaBraM token grid with earlier hidden
+states, but does not rule out using depth evolution as a routing signal.
+
+The `depth` branch now adds two validation-only modes:
+
+- `lastk_delta_gate_uniform`: uniform sample-level summary of the final `k`
+  block deltas;
+- `lastk_delta_gate`: learned softmax selection over those delta summaries.
+
+Both leave the patch adapter input as the final `H_L` grid. They modulate only
+the patch residual with `1 + 0.1 * tanh(depth_gate(summary))`, where the gate
+projection is zero-initialized. Thus initialization is exactly patch-only and
+the gate receives a first backward gradient; the learned scorer becomes active
+after the first gate update. Gate parameters have a separate LR group and zero
+weight decay.
+
+Required preflight tests cover exact initial parity, uniform weights, nonzero
+first gate gradients, post-update scorer gradients, optimizer grouping, and
+existing dense/gamma-zero parity. The first bounded experiment is:
+
+```text
+patch-only
+patch + lastk_delta_gate_uniform, k=2
+patch + lastk_delta_gate, k=2
+```
+
+Use seeds `42` and `1024`, batch size `32`, global LR `7e-4`, core/alpha/gate
+LR scales `0.1`, warmup `10`, workers `0`, epochs `80`, and validation-only
+evaluation. Select by mean validation kappa, require compatible BA and weighted
+F1, then test seed `3407` only after the recipe is frozen. If this bounded gate
+does not improve patch-only, retain direct fusion as a negative ablation and
+move the frozen patch adapter to the remaining datasets.

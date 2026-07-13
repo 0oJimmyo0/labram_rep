@@ -114,7 +114,34 @@ Do not combine learning-rate changes, depth gating, token MLP, larger bottleneck
 ## Explicitly Deferred
 
 - Token-wise MLP branch
-- Depth-aware gating
+- Legacy direct hidden-state depth fusion (retained as a negative ablation)
 - Routing mechanisms
 - Larger adapter bottlenecks
 - Bottleneck and warm-start fallbacks before the optimizer-control phase is complete
+
+## Depth-Conditioned Residual Gate
+
+The direct-fusion depth screen was negative on seed `3407`: uniform k=2 was
+closest to patch-only, while learned v2 and k=4 were worse. This rejects direct
+replacement of the final LaBraM token grid as the first depth interface, but it
+does not reject compact depth information as a routing signal.
+
+The isolated `depth` branch now implements:
+
+```text
+lastk_delta_gate_uniform  uniform sample-level gate from upper-block deltas
+lastk_delta_gate          learned softmax delta summary and sample-level gate
+```
+
+The patch adapter still consumes the final `H_L` grid. The depth summary only
+modulates the patch residual with `1 + 0.1 * tanh(depth_gate(summary))`; the
+gate projection is zero-initialized, so the initial function is exactly
+patch-only. The gate has a separate optimizer group with zero weight decay.
+
+Before submission, require the depth tests, adapter controls, and exact parity
+tests to pass. The bounded experiment is patch-only versus the two new modes at
+`k=2`, on seeds `42` and `1024`, with batch size `32`, global LR `7e-4`, core,
+alpha, and gate LR scales `0.1`, warmup `10`, workers `0`, epochs `80`, and no
+test evaluation. Select by mean validation kappa, require compatible BA and
+weighted F1, and only then evaluate seed `3407`. Do not run k=4 or another LR
+sweep unless this sample-level gate is clearly competitive.

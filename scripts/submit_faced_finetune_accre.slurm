@@ -36,6 +36,7 @@ LABRAM_ADAPTER_INIT_ALPHA="${LABRAM_ADAPTER_INIT_ALPHA:-0.01}"
 LABRAM_ADAPTER_GAMMA="${LABRAM_ADAPTER_GAMMA:-1.0}"
 LABRAM_ADAPTER_LR_SCALE="${LABRAM_ADAPTER_LR_SCALE:-1.0}"
 LABRAM_ADAPTER_ALPHA_LR_SCALE="${LABRAM_ADAPTER_ALPHA_LR_SCALE:-$LABRAM_ADAPTER_LR_SCALE}"
+LABRAM_ADAPTER_GATE_LR_SCALE="${LABRAM_ADAPTER_GATE_LR_SCALE:-$LABRAM_ADAPTER_ALPHA_LR_SCALE}"
 LABRAM_ADAPTER_FIXED_ALPHA="${LABRAM_ADAPTER_FIXED_ALPHA:-}"
 LABRAM_ADAPTER_WEIGHT_DECAY="${LABRAM_ADAPTER_WEIGHT_DECAY:-}"
 LABRAM_ADAPTER_SEED="${LABRAM_ADAPTER_SEED:-12345}"
@@ -51,9 +52,9 @@ if ! awk -v lr="$LR" 'BEGIN { exit !(lr + 0 > 0) }'; then
   echo "LR must be a positive numeric value; got: $LR" >&2
   exit 2
 fi
-if ! awk -v scale="$LABRAM_ADAPTER_LR_SCALE" -v alpha_scale="$LABRAM_ADAPTER_ALPHA_LR_SCALE" \
-  'BEGIN { exit !(scale + 0 >= 0 && alpha_scale + 0 >= 0) }'; then
-  echo "Adapter LR scales must be non-negative; core=$LABRAM_ADAPTER_LR_SCALE alpha=$LABRAM_ADAPTER_ALPHA_LR_SCALE" >&2
+if ! awk -v scale="$LABRAM_ADAPTER_LR_SCALE" -v alpha_scale="$LABRAM_ADAPTER_ALPHA_LR_SCALE" -v gate_scale="$LABRAM_ADAPTER_GATE_LR_SCALE" \
+  'BEGIN { exit !(scale + 0 >= 0 && alpha_scale + 0 >= 0 && gate_scale + 0 >= 0) }'; then
+  echo "Adapter LR scales must be non-negative; core=$LABRAM_ADAPTER_LR_SCALE alpha=$LABRAM_ADAPTER_ALPHA_LR_SCALE gate=$LABRAM_ADAPTER_GATE_LR_SCALE" >&2
   exit 2
 fi
 
@@ -82,7 +83,7 @@ print("gpu count:", torch.cuda.device_count())
 print("lmdb:", lmdb.__file__)
 PY
 nvidia-smi || true
-echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE ADAPTER_CORE_LR_SCALE=$LABRAM_ADAPTER_LR_SCALE ALPHA_LR_SCALE=$LABRAM_ADAPTER_ALPHA_LR_SCALE FIXED_ALPHA=${LABRAM_ADAPTER_FIXED_ALPHA:-learned} ADAPTER_WD=${LABRAM_ADAPTER_WEIGHT_DECAY:-inherit} SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
+echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE ADAPTER_CORE_LR_SCALE=$LABRAM_ADAPTER_LR_SCALE ALPHA_LR_SCALE=$LABRAM_ADAPTER_ALPHA_LR_SCALE GATE_LR_SCALE=$LABRAM_ADAPTER_GATE_LR_SCALE FIXED_ALPHA=${LABRAM_ADAPTER_FIXED_ALPHA:-learned} ADAPTER_WD=${LABRAM_ADAPTER_WEIGHT_DECAY:-inherit} SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
 echo "git_commit: $(git rev-parse HEAD)" >&2
 if [[ -f ./checkpoints/labram-base.pth ]]; then
   echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
@@ -136,6 +137,7 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --labram_adapter_gamma "$LABRAM_ADAPTER_GAMMA" \
   --labram_adapter_lr_scale "$LABRAM_ADAPTER_LR_SCALE" \
   --labram_adapter_alpha_lr_scale "$LABRAM_ADAPTER_ALPHA_LR_SCALE" \
+  --labram_adapter_gate_lr_scale "$LABRAM_ADAPTER_GATE_LR_SCALE" \
   --labram_adapter_seed "$LABRAM_ADAPTER_SEED" \
   --labram_adapter_depth_mode "$LABRAM_ADAPTER_DEPTH_MODE" \
   --labram_adapter_depth_k "$LABRAM_ADAPTER_DEPTH_K" \

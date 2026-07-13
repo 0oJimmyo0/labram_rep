@@ -284,6 +284,9 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         self._last_depth_weight_entropy = None
         self._last_depth_top_layer_share = None
         self._last_depth_source_ratio = None
+        self._last_depth_modulation_mean = None
+        self._last_depth_modulation_std = None
+        self._last_depth_delta_ratio = None
 
         if use_channel_mixer:
             self.channel_norm = nn.LayerNorm(dim)
@@ -333,6 +336,14 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             self.alpha_depth = nn.Parameter(torch.tensor(0.05))
             self.depth_score = nn.Linear(dim, 1, bias=False)
 
+        if self.depth_dim > 0 and self.depth_mode in {
+            "lastk_delta_gate_uniform", "lastk_delta_gate"
+        }:
+            self.depth_norm = nn.LayerNorm(dim)
+            self.depth_gate = nn.Linear(dim, 1, bias=False)
+            if self.depth_mode == "lastk_delta_gate":
+                self.depth_score = nn.Linear(dim, 1, bias=False)
+
     def forward(self, x, depth_summary=None, depth_tokens=None):
         if x.dim() != 4:
             raise ValueError(f"Expected [B,C,S,D], got {tuple(x.shape)}")
@@ -341,7 +352,11 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         delta = torch.zeros_like(x)
         source = x
 
-        if self.depth_mode in {"lastk_attnres", "lastk_uniform", "lastk_attnres_v2"}:
+        depth_modulation = None
+        if self.depth_mode in {
+            "lastk_attnres", "lastk_uniform", "lastk_attnres_v2",
+            "lastk_delta_gate_uniform", "lastk_delta_gate",
+        }:
             if depth_tokens is None or depth_tokens.dim() != 5:
                 raise ValueError(
                     f"{self.depth_mode} requires depth_tokens with shape [B,K,C,S,D]"
@@ -351,7 +366,35 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
                     "Expected depth_tokens shape [B,K,C,S,D] matching the adapter input, "
                     f"got {tuple(depth_tokens.shape)} for input {tuple(x.shape)}"
                 )
-            if self.depth_mode == "lastk_attnres":
+            if self.depth_mode in {"lastk_delta_gate_uniform", "lastk_delta_gate"}:
+                normalized_depth = self.depth_norm(depth_tokens)
+                delta_summary_tokens = normalized_depth.mean(dim=(2, 3))
+                if self.depth_mode == "lastk_delta_gate_uniform":
+                    weights = torch.full(
+                        delta_summary_tokens.shape[:2],
+                        1.0 / delta_summary_tokens.shape[1],
+                        dtype=delta_summary_tokens.dtype,
+                        device=delta_summary_tokens.device,
+                    )
+                else:
+                    scores = self.depth_score(delta_summary_tokens).squeeze(-1)
+                    weights = torch.softmax(scores, dim=1)
+                depth_summary = torch.einsum(
+                    "bk,bkd->bd", weights, delta_summary_tokens
+                )
+                depth_modulation = 1.0 + 0.1 * torch.tanh(self.depth_gate(depth_summary))
+                self._last_depth_modulation_mean = float(
+                    depth_modulation.detach().float().mean().cpu()
+                )
+                self._last_depth_modulation_std = float(
+                    depth_modulation.detach().float().std(unbiased=False).cpu()
+                )
+                self._last_depth_delta_ratio = float(
+                    depth_summary.detach().float().norm()
+                    .div(x.detach().float().norm(dim=-1).mean().clamp_min(1e-12))
+                    .cpu()
+                )
+            elif self.depth_mode == "lastk_attnres":
                 normalized_depth = self.depth_norm(depth_tokens)
                 scores = torch.einsum("bkcsd,d->bkcs", normalized_depth, self.depth_query)
                 weights = torch.softmax(scores / math.sqrt(dim), dim=1)
@@ -363,21 +406,32 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
                 normalized_depth = self.depth_norm(depth_tokens)
                 scores = self.depth_score(normalized_depth).squeeze(-1)
                 weights = torch.softmax(scores, dim=1)
-            depth_selected = torch.einsum("bkcs,bkcsd->bcsd", weights, depth_tokens)
-            if self.depth_mode == "lastk_attnres":
-                depth_mix = torch.tanh(self.depth_mix)
-                source = x + depth_mix * (depth_selected - x)
+            if self.depth_mode in {"lastk_delta_gate_uniform", "lastk_delta_gate"}:
+                self._last_depth_weights = weights.detach().float().mean(dim=0)
+                self._last_depth_weight_entropy = float(
+                    (-weights * weights.clamp_min(1e-12).log()).sum(dim=1).mean()
+                    .detach().float().cpu()
+                )
+                self._last_depth_top_layer_share = float(
+                    weights[:, -1].mean().detach().float().cpu()
+                )
             else:
-                source = x + self.alpha_depth * (depth_selected - x)
-            self._last_depth_weights = weights.detach().float().mean(dim=(0, 2, 3))
-            self._last_depth_weight_entropy = float(
-                (-weights * weights.clamp_min(1e-12).log()).sum(dim=1).mean().detach().float().cpu()
-            )
-            self._last_depth_top_layer_share = float(weights[:, -1].mean().detach().float().cpu())
-            self._last_depth_source_ratio = float(
-                (depth_selected.detach().float() - x.detach().float()).norm()
-                .div(x.detach().float().norm().clamp_min(1e-12)).cpu()
-            )
+                depth_selected = torch.einsum("bkcs,bkcsd->bcsd", weights, depth_tokens)
+                if self.depth_mode == "lastk_attnres":
+                    depth_mix = torch.tanh(self.depth_mix)
+                    source = x + depth_mix * (depth_selected - x)
+                elif self.depth_mode in {"lastk_uniform", "lastk_attnres_v2"}:
+                    source = x + self.alpha_depth * (depth_selected - x)
+                self._last_depth_weights = weights.detach().float().mean(dim=(0, 2, 3))
+                self._last_depth_weight_entropy = float(
+                    (-weights * weights.clamp_min(1e-12).log()).sum(dim=1).mean()
+                    .detach().float().cpu()
+                )
+                self._last_depth_top_layer_share = float(weights[:, -1].mean().detach().float().cpu())
+                self._last_depth_source_ratio = float(
+                    (depth_selected.detach().float() - x.detach().float()).norm()
+                    .div(x.detach().float().norm().clamp_min(1e-12)).cpu()
+                )
 
         if hasattr(self, "channel_attn"):
             xc = source.permute(0, 2, 1, 3).reshape(batch_size * patches, channels, dim)
@@ -386,6 +440,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             yc = yc.reshape(batch_size, patches, channels, dim).permute(0, 2, 1, 3)
             delta = delta + self.alpha_channel * yc
 
+        patch_delta = None
         if hasattr(self, "patch_attn"):
             xp = source.reshape(batch_size * channels, patches, dim)
             xp = self.patch_norm(xp)
@@ -394,12 +449,15 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             self._last_raw_patch_ratio = float(
                 yp.detach().float().norm().div(source.detach().float().norm().clamp_min(1e-12)).cpu()
             )
-            delta = delta + self.alpha_patch * yp
+            patch_delta = self.alpha_patch * yp
+            if depth_modulation is not None:
+                patch_delta = patch_delta * depth_modulation.view(batch_size, 1, 1, 1)
+            delta = delta + patch_delta
 
         if hasattr(self, "token_mlp"):
             delta = delta + self.alpha_token * self.token_mlp(self.token_norm(source))
 
-        if self.depth_gate is not None and depth_summary is not None:
+        if self.depth_mode == "lastk_delta" and self.depth_gate is not None and depth_summary is not None:
             if depth_summary.dim() != 2 or depth_summary.shape[0] != batch_size:
                 raise ValueError(
                     f"Expected depth_summary [B,{self.depth_dim}], got {tuple(depth_summary.shape)}"
@@ -465,11 +523,13 @@ class NeuralTransformer(nn.Module):
             )
         adapter_depth_mode = str(adapter_depth_mode).strip().lower()
         if adapter_depth_mode not in {
-            "none", "lastk_delta", "lastk_attnres", "lastk_uniform", "lastk_attnres_v2"
+            "none", "lastk_delta", "lastk_attnres", "lastk_uniform", "lastk_attnres_v2",
+            "lastk_delta_gate_uniform", "lastk_delta_gate"
         }:
             raise ValueError(
                 "adapter_depth_mode must be 'none', 'lastk_delta', 'lastk_attnres', "
-                "'lastk_uniform', or 'lastk_attnres_v2'"
+                "'lastk_uniform', 'lastk_attnres_v2', 'lastk_delta_gate_uniform', "
+                "or 'lastk_delta_gate'"
             )
         self.adapter_type = adapter_type
         self.adapter_gamma = float(adapter_gamma)
@@ -517,8 +577,14 @@ class NeuralTransformer(nn.Module):
                 )
                 self.native_axis_adapter.apply(self._init_weights)
                 if self.native_axis_adapter.depth_gate is not None:
-                    nn.init.zeros_(self.native_axis_adapter.depth_gate[1].weight)
-                    nn.init.zeros_(self.native_axis_adapter.depth_gate[1].bias)
+                    gate_layer = (
+                        self.native_axis_adapter.depth_gate[1]
+                        if isinstance(self.native_axis_adapter.depth_gate, nn.Sequential)
+                        else self.native_axis_adapter.depth_gate
+                    )
+                    nn.init.zeros_(gate_layer.weight)
+                    if gate_layer.bias is not None:
+                        nn.init.zeros_(gate_layer.bias)
                 if self.adapter_fixed_alpha is not None:
                     for name, parameter in self.native_axis_adapter.named_parameters():
                         if name.startswith("alpha_"):
@@ -590,6 +656,11 @@ class NeuralTransformer(nn.Module):
             )
         if self.native_axis_adapter._last_depth_source_ratio is not None:
             diagnostics["depth_source_ratio"] = self.native_axis_adapter._last_depth_source_ratio
+        if self.native_axis_adapter._last_depth_delta_ratio is not None:
+            diagnostics["depth_delta_ratio"] = self.native_axis_adapter._last_depth_delta_ratio
+        if self.native_axis_adapter._last_depth_modulation_mean is not None:
+            diagnostics["depth_modulation_mean"] = self.native_axis_adapter._last_depth_modulation_mean
+            diagnostics["depth_modulation_std"] = self.native_axis_adapter._last_depth_modulation_std
         if self.native_axis_adapter._last_depth_weights is not None:
             for index, value in enumerate(self.native_axis_adapter._last_depth_weights.tolist()):
                 diagnostics[f"depth_weight_{index}"] = float(value)
@@ -619,6 +690,18 @@ class NeuralTransformer(nn.Module):
             parameter = self.native_axis_adapter.alpha_depth
             diagnostics["alpha_depth_grad_norm"] = float(
                 0.0 if parameter.grad is None else parameter.grad.detach().float().norm().cpu()
+            )
+        if hasattr(self.native_axis_adapter, "depth_gate"):
+            gate_layer = self.native_axis_adapter.depth_gate
+            if isinstance(gate_layer, nn.Sequential):
+                gate_layer = gate_layer[1]
+            diagnostics["depth_gate_grad_norm"] = float(
+                0.0 if gate_layer.weight.grad is None else gate_layer.weight.grad.detach().float().norm().cpu()
+            )
+        if hasattr(self.native_axis_adapter, "depth_score"):
+            diagnostics["depth_score_grad_norm"] = float(
+                0.0 if self.native_axis_adapter.depth_score.weight.grad is None
+                else self.native_axis_adapter.depth_score.weight.grad.detach().float().norm().cpu()
             )
         last_block_grad_sq = 0.0
         for parameter in self.blocks[-1].parameters():
@@ -724,6 +807,8 @@ class NeuralTransformer(nn.Module):
         use_attnres_depth = self.adapter_depth_mode == "lastk_attnres"
         use_uniform_depth = self.adapter_depth_mode == "lastk_uniform"
         use_attnres_depth_v2 = self.adapter_depth_mode == "lastk_attnres_v2"
+        use_delta_gate_uniform = self.adapter_depth_mode == "lastk_delta_gate_uniform"
+        use_delta_gate = self.adapter_depth_mode == "lastk_delta_gate"
         start_idx = max(0, len(self.blocks) - self.adapter_depth_k)
         preceding_start_idx = max(0, len(self.blocks) - self.adapter_depth_k - 1)
         if use_uniform_depth or use_attnres_depth_v2:
@@ -732,6 +817,10 @@ class NeuralTransformer(nn.Module):
             )
         else:
             self._adapter_last_depth_candidate_indices = None
+        if use_delta_gate_uniform or use_delta_gate:
+            self._adapter_last_depth_candidate_indices = list(
+                range(start_idx, len(self.blocks))
+            )
         for idx, blk in enumerate(self.blocks):
             prev_x = x
             x = blk(x, rel_pos_bias=None)
@@ -739,6 +828,13 @@ class NeuralTransformer(nn.Module):
                 depth_states.append(x[:, 1:, :].reshape(batch_size, n, input_time_window, -1))
             if (use_uniform_depth or use_attnres_depth_v2) and preceding_start_idx <= idx < len(self.blocks) - 1:
                 depth_states.append(x[:, 1:, :].reshape(batch_size, n, input_time_window, -1))
+            if use_delta_gate_uniform or use_delta_gate:
+                if idx >= start_idx:
+                    depth_states.append(
+                        (x[:, 1:, :] - prev_x[:, 1:, :]).reshape(
+                            batch_size, n, input_time_window, -1
+                        )
+                    )
             if use_delta_depth and idx >= start_idx:
                 depth_stats.append((x[:, 1:, :] - prev_x[:, 1:, :]).mean(dim=1))
 

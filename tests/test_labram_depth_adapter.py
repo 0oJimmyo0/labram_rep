@@ -118,6 +118,62 @@ def test_zero_v2_beta_matches_patch_only():
     assert (patch_logits - v2_logits).abs().max().item() <= 3e-6
 
 
+def test_delta_gate_starts_at_exact_patch_function():
+    torch.manual_seed(47)
+    patch_only = build("none").eval()
+    torch.manual_seed(47)
+    gated = build("lastk_delta_gate").eval()
+    missing, unexpected = gated.load_state_dict(patch_only.state_dict(), strict=False)
+    assert not unexpected
+    assert all(
+        key.startswith("native_axis_adapter.depth_") for key in missing
+    )
+
+    samples = torch.randn(2, 32, 2, 200)
+    with torch.no_grad():
+        patch_logits = patch_only(samples)
+        gated_logits = gated(samples)
+    assert (patch_logits - gated_logits).abs().max().item() <= 1e-6
+    assert gated.native_axis_adapter._last_depth_modulation_mean == 1.0
+    assert gated.native_axis_adapter._last_depth_modulation_std == 0.0
+
+
+def test_delta_gate_has_first_backward_gate_gradient():
+    torch.manual_seed(53)
+    model = build("lastk_delta_gate")
+    samples = torch.randn(2, 32, 2, 200)
+    logits = model(samples)
+    logits.square().mean().backward()
+
+    adapter = model.native_axis_adapter
+    assert model._adapter_last_depth_candidate_indices == [2, 3]
+    assert torch.allclose(adapter._last_depth_weights.sum(), torch.tensor(1.0), atol=1e-6)
+    assert adapter.depth_gate.weight.grad is not None
+    assert adapter.depth_gate.weight.grad.abs().sum() > 0
+    # The scorer is downstream of the zero-initialized gate. It becomes active
+    # after the first gate update, preserving exact initial patch parity.
+    assert adapter.depth_score.weight.grad is not None
+    assert adapter.depth_score.weight.grad.abs().sum() == 0
+
+    gate_optimizer = torch.optim.SGD([adapter.depth_gate.weight], lr=0.1)
+    gate_optimizer.step()
+    gate_optimizer.zero_grad()
+    model(samples).square().mean().backward()
+    assert adapter.depth_score.weight.grad.abs().sum() > 0
+
+
+def test_uniform_delta_gate_has_equal_weights_and_unit_modulation():
+    torch.manual_seed(59)
+    model = build("lastk_delta_gate_uniform").eval()
+    samples = torch.randn(2, 32, 2, 200)
+    with torch.no_grad():
+        model(samples)
+    adapter = model.native_axis_adapter
+    assert torch.allclose(adapter._last_depth_weights, torch.full_like(adapter._last_depth_weights, 0.5))
+    assert adapter._last_depth_modulation_mean == 1.0
+    assert adapter._last_depth_modulation_std == 0.0
+
+
 def test_legacy_delta_mode_still_forwards():
     torch.manual_seed(29)
     model = build("lastk_delta").eval()
@@ -133,6 +189,9 @@ def main():
     test_v2_starts_unblocked_and_uses_preceding_layers()
     test_uniform_depth_control_has_equal_weights()
     test_zero_v2_beta_matches_patch_only()
+    test_delta_gate_starts_at_exact_patch_function()
+    test_delta_gate_has_first_backward_gate_gradient()
+    test_uniform_delta_gate_has_equal_weights_and_unit_modulation()
     print("depth adapter tests: PASS")
 
 
