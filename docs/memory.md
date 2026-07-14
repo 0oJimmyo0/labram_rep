@@ -502,3 +502,18 @@ workers=0, input_scale_divisor=100, selection=kappa, final test skipped
 The depth jobs run from the isolated `depth` worktree at commit `226b8b3`;
 dense and patch jobs run from `adaptor` commit `5ccde3c`. Test evaluation will
 be performed only after the validation-selected recipe is fixed.
+
+## SEED-V data and channel-order audit (2026-07-14)
+
+Direct LMDB inspection found a legacy artifact: records contain only `sample`
+and `label`, samples are `(62, 1, 200)`, and the trial-based splits contain
+all 16 subjects. The checked-in EEGxPlore preprocessing script instead drops
+`M1`, `M2`, `VEO`, and `HEO`, preserves the remaining CNT `raw.ch_names`
+order, and writes richer metadata. The original CNT files and sidecars are
+not available beside the current LMDB.
+
+`docs/seedv_channel_manifest_provisional.json` records the canonical 62-channel
+SEED-V order for exploratory use. It passes local LaBraM validation, but it is
+not fully verified against the stored tensors until the original CNT channel
+metadata, `Channel Order.xlsx`, or a regenerated provenance-rich LMDB is
+available.

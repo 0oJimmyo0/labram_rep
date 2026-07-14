@@ -433,3 +433,19 @@ Dense and patch jobs use adaptor commit `5ccde3c`; depth jobs use depth commit
 `226b8b3`. Do not inspect test results for selection. Compare mean paired
 validation kappa first, with BA and weighted F1 as required checks; evaluate
 test only after the primary recipe is frozen.
+
+### SEED-V provenance correction
+
+Direct inspection found that the current LMDB is a legacy artifact: its
+records contain only `sample` and `label`, its samples are `(62, 1, 200)`, and
+its trial-based splits contain all 16 subjects. The current EEGxPlore
+preprocessing script preserves CNT channel order after dropping `M1`, `M2`,
+`VEO`, and `HEO`, but the original CNT files and generated sidecars are not
+present beside this LMDB.
+
+Therefore, previous standalone SEED-V jobs are infrastructure smoke tests,
+not paper-grade channel-order validations. A provisional canonical montage is
+stored at `docs/seedv_channel_manifest_provisional.json`. It may be supplied
+explicitly with `--seedv_channel_manifest` for exploratory runs, but final
+SEED-V claims require confirmation from the original CNT metadata or a
+regenerated LMDB that stores channel and preprocessing provenance.
