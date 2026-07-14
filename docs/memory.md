@@ -478,3 +478,27 @@ component comparison is patch-plus-depth minus patch-only. Use paired seeds,
 validation kappa for selection, and require validation BA and weighted F1 to
 remain compatible. Do not develop new architecture on SEED-V; if the dense
 protocol is credible, run the frozen ladder and move on to the next dataset.
+
+### SEED-V native LaBraM jobs submitted (2026-07-14)
+
+The standalone LaBraM-native implementation is being used; the EEGxPlore
+CBraMod-compatible adapter path is not used for this comparison. All jobs use
+the same validation-only recipe:
+
+```text
+SEED-V LMDB: /data/neurogroup/mingyangjiang/data/SEED-V_processed_lmdb
+checkpoint: labram-base.pth, sha256=7c50583826afac76c4ab18f43d958df40496c8229accc09ed6a227c9bb57c37c
+global batch: 64 (32 per GPU x 2), lr=1e-4, weight_decay=0.03
+epochs=40, warmup=5, layer_decay=0.65, drop_path=0.1
+workers=0, input_scale_divisor=100, selection=kappa, final test skipped
+```
+
+| Condition | Seed 42 | Seed 1024 | Seed 3407 |
+| --- | ---: | ---: | ---: |
+| Dense, `adapter_type=none` | 12524845 | 12524846 | 12524847 |
+| Patch-only, `adapter_type=patch` | 12524848 | 12524849 | 12524850 |
+| Patch + depth gate, `lastk_delta_gate`, k=2 | 12524851 | 12524852 | 12524853 |
+
+The depth jobs run from the isolated `depth` worktree at commit `226b8b3`;
+dense and patch jobs run from `adaptor` commit `5ccde3c`. Test evaluation will
+be performed only after the validation-selected recipe is fixed.

@@ -410,3 +410,26 @@ claim is patch-plus-depth minus patch-only. If patch-only reproduces a positive
 paired effect on SEED-V, retain the frozen adapter and proceed to the next
 dataset. If it does not, report the FACED success as dataset-specific and
 investigate preprocessing or optimization parity before adding capacity.
+
+### SEED-V queue
+
+The frozen native LaBraM ladder was submitted as nine validation-only jobs.
+The standalone LaBraM implementation is used for all three conditions; the
+EEGxPlore CBraMod-compatible adapter is intentionally excluded.
+
+```text
+recipe: global batch 64 (32 per GPU x 2), lr 1e-4, weight decay 0.03
+epochs 40, warmup 5, layer decay 0.65, drop path 0.1, workers 0
+input_scale_divisor=100, kappa selection, skip final test
+```
+
+```text
+dense:       12524845 (42), 12524846 (1024), 12524847 (3407)
+patch-only:  12524848 (42), 12524849 (1024), 12524850 (3407)
+depth k=2:   12524851 (42), 12524852 (1024), 12524853 (3407)
+```
+
+Dense and patch jobs use adaptor commit `5ccde3c`; depth jobs use depth commit
+`226b8b3`. Do not inspect test results for selection. Compare mean paired
+validation kappa first, with BA and weighted F1 as required checks; evaluate
+test only after the primary recipe is frozen.
