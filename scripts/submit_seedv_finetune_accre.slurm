@@ -38,6 +38,7 @@ LABRAM_ADAPTER_INIT_ALPHA="${LABRAM_ADAPTER_INIT_ALPHA:-0.01}"
 LABRAM_ADAPTER_GAMMA="${LABRAM_ADAPTER_GAMMA:-1.0}"
 LABRAM_ADAPTER_LR_SCALE="${LABRAM_ADAPTER_LR_SCALE:-0.1}"
 LABRAM_ADAPTER_ALPHA_LR_SCALE="${LABRAM_ADAPTER_ALPHA_LR_SCALE:-0.1}"
+LABRAM_ADAPTER_SEED="${LABRAM_ADAPTER_SEED:-12345}"
 LABRAM_ADAPTER_DEPTH_MODE="${LABRAM_ADAPTER_DEPTH_MODE:-none}"
 LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-2}"
 SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-1}"
@@ -69,6 +70,10 @@ fi
 if [[ "$ALLOW_EXISTING_OUTPUT" != "1" && -d "$OUTPUT_DIR" && -n "$(find "$OUTPUT_DIR" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
   echo "ERROR: output directory is not empty: $OUTPUT_DIR" >&2
   echo "Use a new RUN_ID or set ALLOW_EXISTING_OUTPUT=1 for an intentional resume." >&2
+  exit 1
+fi
+if [[ -z "$SEEDV_CHANNEL_MANIFEST" || ! -f "$SEEDV_CHANNEL_MANIFEST" ]]; then
+  echo "ERROR: SEEDV_CHANNEL_MANIFEST must point to a validated channel manifest" >&2
   exit 1
 fi
 mkdir -p "$OUTPUT_DIR"
@@ -110,6 +115,7 @@ PYTHON_ARGS=(
   --labram_adapter_gamma "$LABRAM_ADAPTER_GAMMA"
   --labram_adapter_lr_scale "$LABRAM_ADAPTER_LR_SCALE"
   --labram_adapter_alpha_lr_scale "$LABRAM_ADAPTER_ALPHA_LR_SCALE"
+  --labram_adapter_seed "$LABRAM_ADAPTER_SEED"
   --labram_adapter_depth_mode "$LABRAM_ADAPTER_DEPTH_MODE"
   --labram_adapter_depth_k "$LABRAM_ADAPTER_DEPTH_K"
   --input_scale_divisor "$INPUT_SCALE_DIVISOR"

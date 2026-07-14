@@ -566,3 +566,26 @@ separate prespecified preprocessing experiment.
 The audit ran from node-local `/dev/shm` after the shared-filesystem scan
 stalled. The JSON records the original LMDB path and the local audit input
 path.
+
+The enhanced audit additionally reports zero exact sample-content overlap
+between split pairs. All keys parse successfully; each split contains all 16
+participants, 48 participant-session combinations, and 240
+participant-session-trial combinations. This confirms the current
+CBraMod-compatible within-subject trial split: train trials `0-4`, validation
+trials `5-9`, and test trials `10-14`. It is not subject-independent evaluation.
+
+The 28 extreme windows above absolute 100 after `/100` scaling are retained in
+the primary dataset and recorded individually in the audit JSON. They are
+mostly concentrated in participant 14, session 3, trials 6 and 9.
+
+## Efficient SEED-V validation screen (2026-07-14)
+
+Keep the development seed packet fixed at `{42, 1024, 3407}`. Do not add the
+alternative confirmation seeds `0`, `7`, or `2026`. First run six
+validation-only jobs: dense and patch-only crossed with the three fixed seeds.
+Use one clean commit and the explicit metadata-verified manifest. Advance
+patch-only only with positive mean paired validation kappa, at least two seed
+wins, and compatible BA/weighted F1. Test depth only after that gate, using a
+fresh patch comparator on the exact depth commit. The raw CNT bridge remains
+unavailable locally and should be completed before final test evaluation, not
+by expanding the current validation workload.

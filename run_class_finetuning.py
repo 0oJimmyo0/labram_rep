@@ -656,6 +656,7 @@ def main(args, ds_init):
             None if args.labram_adapter_fixed_alpha is None
             else float(args.labram_adapter_fixed_alpha)
         ),
+        'adapter_seed': int(args.labram_adapter_seed),
         'channel_count': None if ch_names is None else len(ch_names),
         'channel_manifest_sha256': channel_manifest_sha256,
         'git_commit': git_commit,

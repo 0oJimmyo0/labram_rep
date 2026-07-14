@@ -498,3 +498,40 @@ The audit was executed from a node-local copy because a direct shared-
 filesystem scan stalled. The resulting statistics describe the original LMDB
 path recorded in the JSON; the local copy was used only to make the read
 efficient.
+
+The enhanced audit also found zero exact sample-content overlap across split
+pairs. Every key parsed successfully into subject, session, trial, and window
+metadata. Each split contains all 16 participants, 48 participant-session
+combinations, and 240 participant-session-trial combinations. The protocol is
+therefore a CBraMod-compatible within-subject trial split: train uses trials
+`0-4`, validation uses `5-9`, and test uses `10-14`. It must not be described as
+subject-independent generalization.
+
+All 28 windows exceeding absolute amplitude `100` after `/100` scaling are
+saved with key, label, source metadata, maximum channel/sample location, and
+amplitude statistics. Most are concentrated in participant `14`, session `3`,
+especially trials `6` and `9`. They remain in the primary analysis.
+
+### Efficient SEED-V screen
+
+The development seed packet is fixed to `{42, 1024, 3407}`. Do not add seeds
+`0`, `7`, or `2026` for this study. Run six validation-only jobs first:
+
+```text
+dense:       seeds 42, 1024, 3407
+patch-only:  seeds 42, 1024, 3407
+```
+
+Use one clean commit, the explicit metadata-verified manifest, and the frozen
+recipe already listed above. Advance patch-only only when mean paired
+validation kappa is positive, at least two seeds improve, and BA/weighted F1
+remain compatible. If patch-only advances, compare depth only with a fresh
+patch control on the exact depth implementation commit; do not compare depth
+against a patch run from another commit. Depth is a secondary two-seed screen
+first and does not receive new tuning unless it improves over that same-commit
+patch control.
+
+The raw CNT reconstruction bridge remains unavailable locally because
+`EEG_raw`/CNT files were not found. It is a pre-final-test provenance task, not
+a reason to expand the validation workload now. No broad LR sweep is justified
+before this mapped dense-versus-patch comparison.
