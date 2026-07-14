@@ -333,3 +333,80 @@ the control. Compare validation kappa first, with BA and weighted F1 required
 to remain compatible, and inspect depth gradients, residual ratio, normalized
 entropy, and layer weights. If no condition improves the patch control without
 a metric or stability failure, stop FACED depth tuning.
+
+## FACED decision and SEED-V transition (2026-07-13)
+
+FACED is now treated as the LaBraM interface-development dataset. The main
+positive result is the simple patch-only residual adapter: on seed `3407`, it
+reached validation kappa `0.42660`, BA `0.49352`, and weighted F1 `0.49177`,
+versus dense kappa `0.36881`, BA `0.44244`, and weighted F1 `0.43840` under the
+matched `7e-4` recipe. This is a pilot result for structured residual
+adaptation, not yet a multi-seed final claim.
+
+The explicit depth-delta gate was functional but did not improve patch-only
+reproducibly. Across seeds `42` and `1024`, learned depth had mean validation
+kappa `0.40543` versus patch-only `0.40763`; it improved seed `42` but lost
+seed `1024`. Uniform depth also lost on both seeds. The depth extension is
+therefore a negative FACED component result and must not be allowed to redefine
+the frozen adapter.
+
+The paper-level interpretation is precise: preserve the native pretrained
+backbone, add lightweight residual capacity aligned with its EEG channel-patch
+geometry, and test depth conditioning as a later optional extension. FACED
+supports the first invariant and does not support an added depth benefit here.
+
+## SEED-V frozen evaluation
+
+Do not submit adapter jobs until the native dense protocol is audited and, if
+necessary, rerun under the same wrapper and recipe. An existing seed-3407 dense
+anchor is:
+
+```text
+test BA=0.42304, test kappa=0.28181, test weighted F1=0.43022
+validation kappa=0.23163, validation BA=0.38539, validation weighted F1=0.38653
+best epoch=22, global lr=1e-4, batch size=64, epochs=40
+```
+
+The run used `attnres_variant=none`, `moe=false`, the LaBraM foundation
+checkpoint, kappa-first selection, and the LMDB default trial-based 5:5:5 split.
+It is a credible native dense anchor for the current EEGxPlore pipeline, but
+it uses the wrapper's `all_patch_reps` classifier rather than the official
+LaBraM script's exact downstream head. That distinction must be documented and
+held fixed in all comparisons.
+
+Before the ladder, record and verify:
+
+- foundation checkpoint SHA and successful loaded-tensor count;
+- SEED-V channel order and the fact that the 62-channel input uses stored tensor
+  slot order because no channel manifest is currently supplied;
+- `/100` sample scaling and `(62,1,200)` input schema;
+- LMDB `__keys__` split, sessions `1,2,3`, trials `0-4` train, `5-9` validation,
+  and `10-14` test;
+- native LaBraM normalization/pooling, classifier, optimizer, and scheduler;
+- validation-only kappa checkpoint selection and one final test evaluation.
+
+Freeze the FACED-developed architecture with no new tuning:
+
+```text
+patch attention: unchanged
+placement: final LaBraM [B,C,S,D] token grid before pooling/normalization
+token MLP: off
+depth: none for the primary adapter; k=2 learned delta gate as secondary
+expert banks/routing: off
+```
+
+Use this comparison ladder with paired seeds:
+
+```text
+Native dense LaBraM
+Patch-only LaBraM
+Patch + learned depth-delta gate, k=2
+```
+
+Select checkpoints by validation kappa. Report test BA as the primary outcome,
+test weighted F1 and test kappa as secondary outcomes, and validation BA as a
+diagnostic. The main generalization claim is patch-only minus dense; the depth
+claim is patch-plus-depth minus patch-only. If patch-only reproduces a positive
+paired effect on SEED-V, retain the frozen adapter and proceed to the next
+dataset. If it does not, report the FACED success as dataset-specific and
+investigate preprocessing or optimization parity before adding capacity.
