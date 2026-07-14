@@ -811,12 +811,9 @@ def prepare_TUEV_dataset(root):
 
 
 class SEEDVLoader(torch.utils.data.Dataset):
-    def __init__(self, root, mode="train", input_scale_divisor=100.0):
+    def __init__(self, root, mode="train"):
         self.root = root
         self.mode = mode
-        self.input_scale_divisor = float(input_scale_divisor)
-        if self.input_scale_divisor <= 0:
-            raise ValueError("SEED-V input_scale_divisor must be > 0")
         self.channel_names = read_seedv_channel_names(root)
         try:
             import lmdb  # local import so non-LMDB datasets do not require it
@@ -871,15 +868,16 @@ class SEEDVLoader(torch.utils.data.Dataset):
         if X.ndim != 3:
             raise ValueError(f"Expected SEED-V sample with shape (channels, patches, 200), got {X.shape}")
         Y = int(sample["label"])
-        X = torch.FloatTensor(X) / self.input_scale_divisor
+        # The finetuning engine owns the native LaBraM input scaling. Keeping
+        # the dataset raw prevents applying the divisor twice.
+        X = torch.FloatTensor(X)
         return X, Y
 
 
-def prepare_SEEDV_dataset(root, input_scale_divisor=100.0):
-    print(f"[SEED-V] input_scale_divisor={float(input_scale_divisor):g}")
-    train_dataset = SEEDVLoader(root, mode="train", input_scale_divisor=input_scale_divisor)
-    val_dataset = SEEDVLoader(root, mode="val", input_scale_divisor=input_scale_divisor)
-    test_dataset = SEEDVLoader(root, mode="test", input_scale_divisor=input_scale_divisor)
+def prepare_SEEDV_dataset(root):
+    train_dataset = SEEDVLoader(root, mode="train")
+    val_dataset = SEEDVLoader(root, mode="val")
+    test_dataset = SEEDVLoader(root, mode="test")
     print(len(train_dataset), len(val_dataset), len(test_dataset))
     return train_dataset, test_dataset, val_dataset
 

@@ -306,8 +306,7 @@ def get_dataset(args):
         args.nb_classes = 6
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
     elif dataset_name in {'SEED-V', 'SEEDV'}:
-        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(
-            args.data_path, input_scale_divisor=args.input_scale_divisor)
+        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(args.data_path)
         ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
         if ch_names is None:
             # The current LMDB stores the correct tensor shape (62, 1, 200), but not an
@@ -667,7 +666,7 @@ def main(args, ds_init):
         accuracy = []
         eval_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
         for data_loader in eval_loaders:
-            test_stats = evaluate(data_loader, model, device, header='Test:', ch_names=ch_names, metrics=metrics, is_binary=(args.nb_classes == 1))
+            test_stats = evaluate(data_loader, model, device, header='Test:', ch_names=ch_names, metrics=metrics, is_binary=(args.nb_classes == 1), input_scale_divisor=args.input_scale_divisor)
             accuracy.append(test_stats['accuracy'])
             balanced_accuracy.append(test_stats['balanced_accuracy'])
         print(f"======Accuracy: {np.mean(accuracy)} {np.std(accuracy)}, balanced accuracy: {np.mean(balanced_accuracy)} {np.std(balanced_accuracy)}")
@@ -678,7 +677,7 @@ def main(args, ds_init):
             raise ValueError("Validation-only evaluation requested but no validation dataloader is available.")
         val_stats = evaluate(
             data_loader_val, model, device, header='Validation-only:', ch_names=ch_names,
-            metrics=metrics, is_binary=(args.nb_classes == 1))
+            metrics=metrics, is_binary=(args.nb_classes == 1), input_scale_divisor=args.input_scale_divisor)
         def _eval_stat_value(stats, primary, fallback=None):
             if primary in stats and stats[primary] is not None:
                 return float(stats[primary])
@@ -724,11 +723,12 @@ def main(args, ds_init):
             log_writer=log_writer, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq, 
-            ch_names=ch_names, is_binary=args.nb_classes == 1
+            ch_names=ch_names, is_binary=args.nb_classes == 1,
+            input_scale_divisor=args.input_scale_divisor
         )
         
         if data_loader_val is not None:
-            val_stats = evaluate(data_loader_val, model, device, header='Val:', ch_names=ch_names, metrics=metrics, is_binary=args.nb_classes == 1)
+            val_stats = evaluate(data_loader_val, model, device, header='Val:', ch_names=ch_names, metrics=metrics, is_binary=args.nb_classes == 1, input_scale_divisor=args.input_scale_divisor)
             current_val_score = _stat_value(val_stats, selection_metric, "accuracy")
             current_val_ba = _stat_value(val_stats, sensitivity_metric, "accuracy")
 
@@ -825,7 +825,8 @@ def main(args, ds_init):
             model_without_ddp.load_state_dict(checkpoint["model"])
             stats_list = [
                 evaluate(loader, model, device, header=f"{label} test:", ch_names=ch_names,
-                         metrics=metrics, is_binary=args.nb_classes == 1)
+                         metrics=metrics, is_binary=args.nb_classes == 1,
+                         input_scale_divisor=args.input_scale_divisor)
                 for loader in eval_loaders
             ]
             stats = {
