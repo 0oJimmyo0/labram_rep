@@ -443,12 +443,13 @@ preprocessing script preserves CNT channel order after dropping `M1`, `M2`,
 `VEO`, and `HEO`, but the original CNT files and generated sidecars are not
 present beside this LMDB.
 
-Therefore, previous standalone SEED-V jobs are infrastructure smoke tests,
-not paper-grade channel-order validations. A provisional canonical montage is
-stored at `docs/seedv_channel_manifest_provisional.json`. It may be supplied
-explicitly with `--seedv_channel_manifest` for exploratory runs, but final
-SEED-V claims require confirmation from the original CNT metadata or a
-regenerated LMDB that stores channel and preprocessing provenance.
+Therefore, previous standalone SEED-V jobs used an unverified channel-order
+manifest. `Channel Order.xlsx` and `channel_62_pos.locs` have now been found;
+they independently match the checked-in 62-channel sequence exactly. The
+manifest records this as `metadata_verified_row_linkage_pending` and includes
+both source hashes. Final SEED-V claims may use this order once it is confirmed
+that these artifacts were the inputs used to create the legacy LMDB; otherwise
+the old LMDB still cannot prove its tensor-row linkage by itself.
 
 ### SEED-V contract hardening
 
@@ -461,7 +462,9 @@ validated manifest for SEED-V and record the normalized channel list, mapped
 `input_chans`, manifest file hash, pretrained checkpoint hash, and split-key
 metadata in `run_config.json`.
 
-`scripts/audit_seedv_lmdb.py` provides a one-time full-record audit for shape,
+`scripts/verify_seedv_channel_metadata.py` verifies the spreadsheet, `.locs`,
+and manifest order without requiring `openpyxl`. `scripts/audit_seedv_lmdb.py`
+provides a one-time full-record audit for shape,
 finite values, labels, class counts, key-list hashes, and raw amplitude
 percentiles. It should be run before any paper-grade result is accepted. A
 62-channel provisional manifest can establish an exploratory mapped baseline,
@@ -471,3 +474,27 @@ The current two-GPU launchers do not enable `--dist_eval`; validation and test
 therefore use the sequential sampler on each rank. Do not enable distributed
 evaluation for final selection until prediction gathering or a non-padding
 evaluation sampler is implemented and tested.
+
+### SEED-V LMDB audit result
+
+The complete audit is saved at `docs/seedv_lmdb_audit.json`. All `117744`
+records passed the structural checks:
+
+- every sample is `(62, 1, 200)` and finite;
+- every label is scalar and lies in `[0, 4]`;
+- train/validation/test key lists have zero pairwise overlap;
+- stored dtype is consistently `float64`.
+
+The audit also found a sparse amplitude tail. The median per-sample maximum
+is approximately `90` raw units in all splits, while the raw maximum reaches
+`2555` in train, `114438` in validation, and `43418` in test. After the current
+`/100` scaling, only `26` validation and `2` test samples exceed `100` in
+absolute value. This is not a structural loader failure, but it is a
+preprocessing risk that should be retained as a diagnostic. Do not clamp,
+drop, or retune around these windows before comparing the frozen dense and
+patch recipes under identical input scaling.
+
+The audit was executed from a node-local copy because a direct shared-
+filesystem scan stalled. The resulting statistics describe the original LMDB
+path recorded in the JSON; the local copy was used only to make the read
+efficient.

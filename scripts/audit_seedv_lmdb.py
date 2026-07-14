@@ -73,10 +73,116 @@ def audit_split(txn, keys, split):
     }
 
 
+def audit_database(txn, split_index):
+    """Audit all records in one sequential LMDB cursor pass."""
+    split_by_key = {}
+    for split, keys in split_index.items():
+        for key in keys:
+            encoded = key.encode("utf-8") if isinstance(key, str) else bytes(key)
+            if encoded in split_by_key:
+                raise ValueError(f"Duplicate key appears in multiple split lists: {key!r}")
+            split_by_key[encoded] = split
+
+    stats = {}
+    for split in ("train", "val", "test"):
+        stats[split] = {
+            "labels": collections.Counter(),
+            "shape_counts": collections.Counter(),
+            "dtype_counts": collections.Counter(),
+            "finite": True,
+            "sample_count": 0,
+            "total_values": 0,
+            "max_abs": 0.0,
+            "abs_values": [],
+            "sample_max": [],
+            "sample_median_abs": [],
+            "sample_p99_abs": [],
+        }
+
+    found = collections.Counter()
+    for key, raw in txn.cursor():
+        split = split_by_key.get(bytes(key))
+        if split is None:
+            continue
+        record = pickle.loads(raw)
+        if "sample" not in record or "label" not in record:
+            raise ValueError(f"SEED-V record {key!r} must contain sample and label fields")
+        X = np.asarray(record["sample"])
+        label_values = np.asarray(record["label"]).reshape(-1)
+        if label_values.size != 1:
+            raise ValueError(f"SEED-V record {key!r} must contain one scalar label")
+        label = int(label_values[0])
+        current = stats[split]
+        current["sample_count"] += 1
+        current["shape_counts"][str(tuple(X.shape))] += 1
+        current["dtype_counts"][str(X.dtype)] += 1
+        current["labels"][str(label)] += 1
+        current["finite"] = current["finite"] and bool(np.isfinite(X).all())
+        current["total_values"] += X.size
+        current["max_abs"] = max(current["max_abs"], float(np.max(np.abs(X))))
+        current["sample_max"].append(float(np.max(np.abs(X))))
+        current["sample_median_abs"].append(float(np.median(np.abs(X))))
+        current["sample_p99_abs"].append(float(np.percentile(np.abs(X), 99)))
+        if len(current["abs_values"]) < 32 * int(np.prod(EXPECTED_SHAPE)):
+            current["abs_values"].extend(np.abs(X).reshape(-1).tolist())
+        found[split] += 1
+
+    expected_counts = {split: len(split_index[split]) for split in ("train", "val", "test")}
+    if dict(found) != expected_counts:
+        raise ValueError(f"LMDB records missing from split index: found={dict(found)} expected={expected_counts}")
+
+    output = {}
+    for split, current in stats.items():
+        if current["shape_counts"] != {str(EXPECTED_SHAPE): expected_counts[split]}:
+            raise ValueError(f"{split} contains unexpected shapes: {dict(current['shape_counts'])}")
+        if set(current["labels"]) - {str(label) for label in LABEL_RANGE}:
+            raise ValueError(f"{split} contains labels outside [0, 4]: {dict(current['labels'])}")
+        if not current["finite"]:
+            raise ValueError(f"{split} contains NaN or Inf")
+        abs_values = np.asarray(current.pop("abs_values"), dtype=np.float64)
+        sample_max = np.asarray(current.pop("sample_max"), dtype=np.float64)
+        sample_median_abs = np.asarray(current.pop("sample_median_abs"), dtype=np.float64)
+        sample_p99_abs = np.asarray(current.pop("sample_p99_abs"), dtype=np.float64)
+
+        def percentile_summary(values):
+            return {
+                str(q): float(np.percentile(values, q))
+                for q in (50, 90, 95, 99, 99.9, 100)
+            }
+
+        output[split] = {
+            "sample_count": current["sample_count"],
+            "key_sha256": key_digest(split_index[split]),
+            "sample_shape": list(EXPECTED_SHAPE),
+            "label_counts": dict(sorted(current["labels"].items(), key=lambda item: int(item[0]))),
+            "shape_counts": dict(current["shape_counts"]),
+            "dtype_counts": dict(current["dtype_counts"]),
+            "finite": current["finite"],
+            "max_abs": current["max_abs"],
+            "first_32_samples_abs_percentiles": {
+                str(q): float(np.percentile(abs_values, q)) for q in (50, 95, 99)
+            },
+            "total_values": current["total_values"],
+            "per_sample_amplitude": {
+                "sample_max_abs": percentile_summary(sample_max),
+                "sample_median_abs": percentile_summary(sample_median_abs),
+                "sample_p99_abs": percentile_summary(sample_p99_abs),
+                "sample_max_abs_above_threshold": {
+                    str(threshold): int(np.sum(sample_max > threshold))
+                    for threshold in (100, 1000, 10000)
+                },
+                "sample_max_abs_after_divisor_100": percentile_summary(sample_max / 100.0),
+            },
+        }
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--reported-data-path", default="",
+                        help="Original dataset path to record when auditing a local copy.")
     args = parser.parse_args()
 
     with lmdb.open(args.data_path, readonly=True, lock=False, readahead=False, meminit=False).begin(write=False) as txn:
@@ -85,7 +191,8 @@ def main():
             raise KeyError("LMDB is missing __keys__")
         split_index = pickle.loads(raw_keys)
         result = {
-            "data_path": os.path.abspath(args.data_path),
+            "data_path": os.path.abspath(args.reported_data_path or args.data_path),
+            "audit_input_path": os.path.abspath(args.data_path),
             "expected_shape": list(EXPECTED_SHAPE),
             "label_range": [0, 4],
             "splits": {},
@@ -93,7 +200,7 @@ def main():
         for split in ("train", "val", "test"):
             if split not in split_index:
                 raise KeyError(f"LMDB is missing split {split!r}")
-            result["splits"][split] = audit_split(txn, split_index[split], split)
+        result["splits"] = audit_database(txn, split_index)
         split_sets = {
             split: {
                 key.encode("utf-8") if isinstance(key, str) else bytes(key)

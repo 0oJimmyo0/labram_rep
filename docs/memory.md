@@ -512,18 +512,21 @@ all 16 subjects. The checked-in EEGxPlore preprocessing script instead drops
 order, and writes richer metadata. The original CNT files and sidecars are
 not available beside the current LMDB.
 
-`docs/seedv_channel_manifest_provisional.json` records the canonical 62-channel
-SEED-V order for exploratory use. It passes local LaBraM validation, but it is
-not fully verified against the stored tensors until the original CNT channel
-metadata, `Channel Order.xlsx`, or a regenerated provenance-rich LMDB is
-available.
+`docs/seedv_channel_manifest_provisional.json` now records the status
+`metadata_verified_row_linkage_pending`. The newly found `Channel Order.xlsx`
+and `channel_62_pos.locs` both contain the same ordered 62-channel list as the
+manifest, and their SHA-256 values are recorded there. This verifies the
+source montage definition, but the legacy LMDB still does not encode that
+these external artifacts were used to determine its tensor row order.
 
 ### SEED-V contract hardening (2026-07-14)
 
 The remaining channel-order limitation is scientific, not a missing-name
 software bug: matching 62 names to 62 tensor rows proves only dimensional
-compatibility. The legacy LMDB does not contain the original row-to-electrode
-mapping, so the provisional manifest must remain explicitly exploratory.
+compatibility. The source metadata now agrees exactly, but the legacy LMDB
+does not contain the original row-to-electrode mapping. Confirm that these
+artifacts belong to the LMDB preprocessing run before removing the exploratory
+qualification.
 
 The `adaptor` and `depth` worktrees now require the known legacy SEED-V shape
 `(62, 1, 200)`, finite samples, scalar labels in `[0, 4]`, and a validated
@@ -544,3 +547,22 @@ The current launcher does not pass `--dist_eval`, so validation uses the
 sequential sampler rather than the padding distributed sampler. Keep that
 setting fixed until a gathered, non-duplicating distributed evaluator is
 implemented.
+
+### SEED-V LMDB audit result (2026-07-14)
+
+`docs/seedv_lmdb_audit.json` contains the complete 117744-record audit. Every
+record passed the expected `(62, 1, 200)` shape, finite-value, scalar-label,
+and `[0,4]` label checks. Train/validation/test key lists have zero pairwise
+overlap, and all records are stored as `float64`.
+
+The main remaining data signal is a sparse amplitude tail. Median sample
+maximum is about 90 raw units in each split; raw maxima are 2555 train, 114438
+validation, and 43418 test. With `/100` scaling, 26 validation and 2 test
+windows still exceed 100 absolute units. Treat this as a shared preprocessing
+diagnostic for dense and adapter runs, not as a reason to change the recipe
+before a controlled comparison. Do not clamp or delete windows without a
+separate prespecified preprocessing experiment.
+
+The audit ran from node-local `/dev/shm` after the shared-filesystem scan
+stalled. The JSON records the original LMDB path and the local audit input
+path.

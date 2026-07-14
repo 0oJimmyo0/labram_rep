@@ -1,6 +1,6 @@
 {
   "dataset": "SEED-V",
-  "status": "provisional",
+  "status": "metadata_verified_row_linkage_pending",
   "labram_channel_names": [
     "FP1", "FPZ", "FP2", "AF3", "AF4", "F7", "F5", "F3", "F1", "FZ", "F2", "F4",
     "F6", "F8", "FT7", "FC5", "FC3", "FC1", "FCZ", "FC2", "FC4", "FC6", "FT8",
@@ -12,8 +12,29 @@
   "order_basis": [
     "The EEGxPlore preprocessing drops M1, M2, VEO, and HEO.",
     "The preprocessing then preserves the source CNT channel order.",
-    "This list follows the canonical SEED-V 62-channel montage order published by TorchEEG."
+    "This list follows the canonical SEED-V 62-channel montage order published by TorchEEG.",
+    "Channel Order.xlsx and channel_62_pos.locs independently contain the same ordered 62-channel list."
   ],
+  "source_artifacts": [
+    {
+      "name": "Channel Order.xlsx",
+      "sha256": "6cdc7d5b894aa8e80fca48bae99e55e6f8737c99a72527945a3c24717731f760",
+      "role": "ordered channel-name metadata"
+    },
+    {
+      "name": "channel_62_pos.locs",
+      "sha256": "c79c149c3c36812856f3991d821b0fd3465ead0734319e5b1b47dae979e7b727",
+      "role": "ordered channel-name and electrode-position metadata"
+    }
+  ],
+  "metadata_consistency": {
+    "xlsx_count": 62,
+    "locs_count": 62,
+    "xlsx_matches_locs": true,
+    "xlsx_matches_manifest": true,
+    "locs_matches_manifest": true
+  },
+  "row_order_status": "The source metadata order is verified. Direct linkage from these external artifacts to the legacy LMDB tensor rows remains unencoded; treat the manifest as paper-grade only if these artifacts are confirmed to be the preprocessing inputs for that LMDB.",
   "unverified_items": [
     "The original CNT files are not available on this filesystem.",
     "The current LMDB does not store raw channel names or preprocessing metadata.",
