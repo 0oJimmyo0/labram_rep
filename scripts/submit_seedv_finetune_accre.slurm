@@ -2,7 +2,7 @@
 #SBATCH --job-name=labram_seedv_native
 #SBATCH --account=neurogroup_acc
 #SBATCH --partition=batch_gpu
-#SBATCH --gres=gpu:nvidia_rtx_a6000:2
+#SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
@@ -19,7 +19,7 @@ EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 REQUIRE_CLEAN_TREE="${REQUIRE_CLEAN_TREE:-1}"
 ALLOW_EXISTING_OUTPUT="${ALLOW_EXISTING_OUTPUT:-0}"
 SEEDV_CHANNEL_MANIFEST="${SEEDV_CHANNEL_MANIFEST:-}"
-NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
+NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 NUM_WORKERS="${NUM_WORKERS:-0}"
 EPOCHS="${EPOCHS:-40}"
