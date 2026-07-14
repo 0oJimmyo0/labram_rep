@@ -312,7 +312,7 @@ def get_dataset(args):
         ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
         if ch_names is None:
             raise RuntimeError(
-                "SEED-V LaBraM runs require a validated 62-channel manifest. "
+                "SEED-V LaBraM runs require a validated channel manifest matching the stored tensor. "
                 "Provide --seedv_channel_manifest or place channel_names.json beside the LMDB."
             )
         else:
