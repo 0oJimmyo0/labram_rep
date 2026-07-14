@@ -220,6 +220,8 @@ def get_args():
                         help='dataset: TUAB | TUEV | SEED-V | FACED')
     parser.add_argument('--data_path', default='',
                         help='path to the preprocessed TUAB/TUEV dataset root')
+    parser.add_argument('--seedv_channel_manifest', default='',
+                        help='validated SEED-V channel manifest JSON path')
     parser.add_argument('--input_scale_divisor', default=100.0, type=float,
                         help='Divide stored SEED-V/FACED samples by this value before LaBraM. Use 1 to preserve raw scale.')
 
@@ -303,18 +305,15 @@ def get_dataset(args):
         args.nb_classes = 6
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
     elif dataset_name in {'SEED-V', 'SEEDV'}:
-        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(args.data_path)
+        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(
+            args.data_path,
+            channel_manifest=args.seedv_channel_manifest or None,
+        )
         ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
         if ch_names is None:
-            # The current LMDB stores the correct tensor shape (62, 1, 200), but not an
-            # explicit channel-name manifest. We therefore preserve the stored tensor
-            # order as-is and let LaBraM consume exactly the observed 62 channel slots,
-            # rather than inventing a channel permutation or expanding to unused slots.
-            warnings.warn(
-                "SEED-V channel names are not encoded in the current LMDB/schema sidecars; "
-                "LaBraM will consume the stored 62-channel tensor order directly until "
-                "an explicit channel-order manifest is provided.",
-                RuntimeWarning,
+            raise RuntimeError(
+                "SEED-V LaBraM runs require a validated 62-channel manifest. "
+                "Provide --seedv_channel_manifest or place channel_names.json beside the LMDB."
             )
         else:
             print(f"Loaded SEED-V channel manifest with {len(ch_names)} channels.")
@@ -605,7 +604,16 @@ def main(args, ds_init):
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         git_commit = 'unknown'
+    channel_manifest_sha256 = None
+    if ch_names is not None:
+        channel_manifest_sha256 = hashlib.sha256(
+            json.dumps(ch_names, ensure_ascii=True, separators=(',', ':')).encode('utf-8')
+        ).hexdigest()
     run_config = {
+        'dataset': str(args.dataset),
+        'data_path': os.path.abspath(args.data_path) if args.data_path else '',
+        'input_scale_divisor': float(args.input_scale_divisor),
+        'seedv_channel_manifest': os.path.abspath(args.seedv_channel_manifest) if args.seedv_channel_manifest else '',
         'requested_lr_string': args.requested_lr_string or str(args.lr),
         'parsed_args_lr': float(args.lr),
         'max_scheduled_lr': max_scheduled_lr,
@@ -623,6 +631,8 @@ def main(args, ds_init):
             None if args.labram_adapter_fixed_alpha is None
             else float(args.labram_adapter_fixed_alpha)
         ),
+        'channel_count': None if ch_names is None else len(ch_names),
+        'channel_manifest_sha256': channel_manifest_sha256,
         'git_commit': git_commit,
         'output_dir': os.path.abspath(args.output_dir) if args.output_dir else '',
     }

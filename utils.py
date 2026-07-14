@@ -811,10 +811,15 @@ def prepare_TUEV_dataset(root):
 
 
 class SEEDVLoader(torch.utils.data.Dataset):
-    def __init__(self, root, mode="train"):
+    def __init__(self, root, mode="train", channel_manifest=None):
         self.root = root
         self.mode = mode
-        self.channel_names = read_seedv_channel_names(root)
+        self.channel_names = read_seedv_channel_names(root, manifest_path=channel_manifest)
+        if self.channel_names is None:
+            raise RuntimeError(
+                "SEED-V requires a validated 62-channel manifest. "
+                "Provide channel_names.json beside the LMDB or pass an explicit manifest path."
+            )
         try:
             import lmdb  # local import so non-LMDB datasets do not require it
         except ImportError as exc:
@@ -874,10 +879,10 @@ class SEEDVLoader(torch.utils.data.Dataset):
         return X, Y
 
 
-def prepare_SEEDV_dataset(root):
-    train_dataset = SEEDVLoader(root, mode="train")
-    val_dataset = SEEDVLoader(root, mode="val")
-    test_dataset = SEEDVLoader(root, mode="test")
+def prepare_SEEDV_dataset(root, channel_manifest=None):
+    train_dataset = SEEDVLoader(root, mode="train", channel_manifest=channel_manifest)
+    val_dataset = SEEDVLoader(root, mode="val", channel_manifest=channel_manifest)
+    test_dataset = SEEDVLoader(root, mode="test", channel_manifest=channel_manifest)
     print(len(train_dataset), len(val_dataset), len(test_dataset))
     return train_dataset, test_dataset, val_dataset
 
@@ -1049,6 +1054,11 @@ def _validate_channel_names(channel_names, root, dataset_name: str, expected_cou
             f"{dataset_name} channel manifest for {root} has {len(normalized)} channels instead of {expected_count}; ignoring it."
         )
         return None
+    if len(set(normalized)) != len(normalized):
+        warnings.warn(
+            f"{dataset_name} channel manifest for {root} contains duplicate channel names; ignoring it."
+        )
+        return None
     missing = [ch for ch in normalized if ch not in standard_1020]
     if missing:
         warnings.warn(
@@ -1074,7 +1084,7 @@ def _extract_channel_names_payload(payload):
     return None
 
 
-def read_seedv_channel_names(root) -> Optional[list]:
+def read_seedv_channel_names(root, manifest_path=None) -> Optional[list]:
     candidate_keys = [
         b"__channel_names__",
         b"channel_names",
@@ -1082,6 +1092,7 @@ def read_seedv_channel_names(root) -> Optional[list]:
         b"channels",
     ]
     candidate_files = [
+        manifest_path,
         root + "_channel_names.json",
         root + "_channel_names.pkl",
         root + "_metadata.json",
@@ -1117,7 +1128,7 @@ def read_seedv_channel_names(root) -> Optional[list]:
             pass
 
     for path in candidate_files:
-        if not os.path.isfile(path):
+        if not path or not os.path.isfile(path):
             continue
         try:
             if path.endswith(".json"):
