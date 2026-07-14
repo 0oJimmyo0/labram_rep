@@ -223,6 +223,8 @@ def get_args():
                         help='dataset: TUAB | TUEV | SEED-V | FACED')
     parser.add_argument('--data_path', default='',
                         help='path to the preprocessed TUAB/TUEV dataset root')
+    parser.add_argument('--input_scale_divisor', default=100.0, type=float,
+                        help='Divide stored SEED-V/FACED samples by this value before LaBraM. Use 1 to preserve raw scale.')
 
     known_args, _ = parser.parse_known_args()
 
@@ -304,7 +306,8 @@ def get_dataset(args):
         args.nb_classes = 6
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
     elif dataset_name in {'SEED-V', 'SEEDV'}:
-        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(args.data_path)
+        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(
+            args.data_path, input_scale_divisor=args.input_scale_divisor)
         ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
         if ch_names is None:
             # The current LMDB stores the correct tensor shape (62, 1, 200), but not an
