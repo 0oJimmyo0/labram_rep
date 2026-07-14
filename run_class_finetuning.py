@@ -286,6 +286,16 @@ def shared_parameter_checksum(model):
     return digest.hexdigest()
 
 
+def _sha256_file(path):
+    if not path or not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def get_dataset(args):
     if not args.data_path:
         raise ValueError("--data_path must point to the preprocessed dataset root")
@@ -605,15 +615,30 @@ def main(args, ds_init):
     except (OSError, subprocess.CalledProcessError):
         git_commit = 'unknown'
     channel_manifest_sha256 = None
+    channel_manifest_file_sha256 = _sha256_file(args.seedv_channel_manifest)
+    checkpoint_sha256 = _sha256_file(args.finetune)
+    input_chans = None
     if ch_names is not None:
         channel_manifest_sha256 = hashlib.sha256(
             json.dumps(ch_names, ensure_ascii=True, separators=(',', ':')).encode('utf-8')
         ).hexdigest()
+        input_chans = utils.get_input_chans(ch_names)
+    split_metadata = {}
+    if str(args.dataset).upper().replace('_', '-') in {'SEED-V', 'SEEDV'}:
+        for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
+            if hasattr(dataset, 'split_metadata'):
+                split_metadata[split_name] = dataset.split_metadata()
     run_config = {
         'dataset': str(args.dataset),
         'data_path': os.path.abspath(args.data_path) if args.data_path else '',
         'input_scale_divisor': float(args.input_scale_divisor),
         'seedv_channel_manifest': os.path.abspath(args.seedv_channel_manifest) if args.seedv_channel_manifest else '',
+        'channel_names': ch_names,
+        'input_chans': input_chans,
+        'channel_manifest_file_sha256': channel_manifest_file_sha256,
+        'pretrained_checkpoint': os.path.abspath(args.finetune) if args.finetune else '',
+        'pretrained_checkpoint_sha256': checkpoint_sha256,
+        'dataset_split_metadata': split_metadata,
         'requested_lr_string': args.requested_lr_string or str(args.lr),
         'parsed_args_lr': float(args.lr),
         'max_scheduled_lr': max_scheduled_lr,

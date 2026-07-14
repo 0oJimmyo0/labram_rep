@@ -10,6 +10,7 @@
 # ---------------------------------------------------------
 
 import io
+import hashlib
 import os
 import math
 import time
@@ -811,9 +812,14 @@ def prepare_TUEV_dataset(root):
 
 
 class SEEDVLoader(torch.utils.data.Dataset):
-    def __init__(self, root, mode="train", channel_manifest=None):
+    expected_shape = None
+    label_min = 0
+    label_max = 4
+
+    def __init__(self, root, mode="train", channel_manifest=None, expected_shape=None):
         self.root = root
         self.mode = mode
+        self.expected_shape = tuple(expected_shape) if expected_shape is not None else None
         self.channel_names = read_seedv_channel_names(root, manifest_path=channel_manifest)
         if self.channel_names is None:
             raise RuntimeError(
@@ -847,11 +853,7 @@ class SEEDVLoader(torch.utils.data.Dataset):
         if first_raw is None:
             raise KeyError(f"SEED-V LMDB key not found: {self.keys[0]!r}")
         first_sample = pickle.loads(first_raw)
-        first_shape = tuple(np.asarray(first_sample.get("sample")).shape)
-        if len(first_shape) != 3:
-            raise ValueError(
-                f"Expected SEED-V sample with shape (channels, patches, time), got {first_shape}"
-            )
+        first_shape = self._validate_sample(first_sample, self.keys[0])
         self.channel_count = first_shape[0]
         self.sample_shape = first_shape
         if len(self.channel_names) != self.channel_count:
@@ -865,6 +867,43 @@ class SEEDVLoader(torch.utils.data.Dataset):
 
     def get_ch_names(self):
         return self.channel_names
+
+    def _validate_sample(self, sample, key):
+        if "sample" not in sample or "label" not in sample:
+            raise ValueError(f"SEED-V record {key!r} must contain sample and label fields")
+        X = np.asarray(sample["sample"])
+        expected_shape = self.expected_shape
+        if expected_shape is None:
+            expected_shape = (X.shape[0], 1, 200)
+        if tuple(X.shape) != expected_shape:
+            raise ValueError(
+                f"SEED-V record {key!r} expected shape {expected_shape}, got {tuple(X.shape)}"
+            )
+        if not np.isfinite(X).all():
+            raise ValueError(f"SEED-V record {key!r} contains NaN or Inf")
+        label_values = np.asarray(sample["label"]).reshape(-1)
+        if label_values.size != 1:
+            raise ValueError(f"SEED-V record {key!r} must contain one scalar label, got {label_values.shape}")
+        label = int(label_values[0])
+        if not self.label_min <= label <= self.label_max:
+            raise ValueError(
+                f"SEED-V record {key!r} label must be in [{self.label_min}, {self.label_max}], got {label}"
+            )
+        return tuple(X.shape)
+
+    def split_metadata(self):
+        """Return cheap immutable split metadata without reading every sample."""
+        digest = hashlib.sha256()
+        for key in self.keys:
+            encoded = key.encode("utf-8") if isinstance(key, str) else bytes(key)
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        return {
+            "mode": self.mode,
+            "sample_count": len(self.keys),
+            "key_sha256": digest.hexdigest(),
+            "sample_shape": list(self.sample_shape),
+        }
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -891,14 +930,9 @@ class SEEDVLoader(torch.utils.data.Dataset):
         if raw is None:
             raise KeyError(f"SEED-V LMDB key not found: {key!r}")
         sample = pickle.loads(raw)
-        X = sample["sample"]
-        if X.ndim != 3:
-            raise ValueError(f"Expected SEED-V sample with shape (channels, patches, time), got {X.shape}")
-        if X.shape[0] != self.channel_count:
-            raise ValueError(
-                f"SEED-V sample channel count changed within split: expected {self.channel_count}, got {X.shape[0]}"
-            )
-        Y = int(sample["label"])
+        self._validate_sample(sample, key)
+        X = np.asarray(sample["sample"])
+        Y = int(np.asarray(sample["label"]).reshape(-1)[0])
         # The finetuning engine owns the native LaBraM input scaling. Keeping
         # the dataset raw prevents applying the divisor twice.
         X = torch.FloatTensor(X)
@@ -906,9 +940,10 @@ class SEEDVLoader(torch.utils.data.Dataset):
 
 
 def prepare_SEEDV_dataset(root, channel_manifest=None):
-    train_dataset = SEEDVLoader(root, mode="train", channel_manifest=channel_manifest)
-    val_dataset = SEEDVLoader(root, mode="val", channel_manifest=channel_manifest)
-    test_dataset = SEEDVLoader(root, mode="test", channel_manifest=channel_manifest)
+    expected_shape = (62, 1, 200)
+    train_dataset = SEEDVLoader(root, mode="train", channel_manifest=channel_manifest, expected_shape=expected_shape)
+    val_dataset = SEEDVLoader(root, mode="val", channel_manifest=channel_manifest, expected_shape=expected_shape)
+    test_dataset = SEEDVLoader(root, mode="test", channel_manifest=channel_manifest, expected_shape=expected_shape)
     print(len(train_dataset), len(val_dataset), len(test_dataset))
     return train_dataset, test_dataset, val_dataset
 

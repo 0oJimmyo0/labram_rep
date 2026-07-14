@@ -517,3 +517,30 @@ SEED-V order for exploratory use. It passes local LaBraM validation, but it is
 not fully verified against the stored tensors until the original CNT channel
 metadata, `Channel Order.xlsx`, or a regenerated provenance-rich LMDB is
 available.
+
+### SEED-V contract hardening (2026-07-14)
+
+The remaining channel-order limitation is scientific, not a missing-name
+software bug: matching 62 names to 62 tensor rows proves only dimensional
+compatibility. The legacy LMDB does not contain the original row-to-electrode
+mapping, so the provisional manifest must remain explicitly exploratory.
+
+The `adaptor` and `depth` worktrees now require the known legacy SEED-V shape
+`(62, 1, 200)`, finite samples, scalar labels in `[0, 4]`, and a validated
+manifest. The underlying loader remains configurable for a different real
+channel count when used with a different dataset artifact; LaBraM positional
+selection receives the actual manifest length rather than padding to 62.
+
+Run provenance now includes the complete normalized channel list, mapped
+LaBraM `input_chans`, manifest-file SHA-256, pretrained-checkpoint SHA-256,
+sample shape, and split key-list hashes/counts. The new
+`scripts/audit_seedv_lmdb.py` performs a one-time full-record audit including
+class counts and raw amplitude percentiles. The full scan was attempted on
+the current 12 GB LMDB but was stopped after prolonged shared-filesystem I/O;
+its JSON output is therefore not yet evidence and must be regenerated on a
+suitable node before final SEED-V reporting.
+
+The current launcher does not pass `--dist_eval`, so validation uses the
+sequential sampler rather than the padding distributed sampler. Keep that
+setting fixed until a gathered, non-duplicating distributed evaluator is
+implemented.

@@ -449,3 +449,25 @@ stored at `docs/seedv_channel_manifest_provisional.json`. It may be supplied
 explicitly with `--seedv_channel_manifest` for exploratory runs, but final
 SEED-V claims require confirmation from the original CNT metadata or a
 regenerated LMDB that stores channel and preprocessing provenance.
+
+### SEED-V contract hardening
+
+The loader and the isolated `depth` worktree now fail closed on the known
+legacy contract `(62, 1, 200)`, non-finite samples, non-scalar labels, and
+labels outside `[0, 4]`. The loader still supports another explicit channel
+count when constructed for a different, provenance-rich artifact; the model
+itself is not hard-coded to 62 channels. Both worktrees require an explicit
+validated manifest for SEED-V and record the normalized channel list, mapped
+`input_chans`, manifest file hash, pretrained checkpoint hash, and split-key
+metadata in `run_config.json`.
+
+`scripts/audit_seedv_lmdb.py` provides a one-time full-record audit for shape,
+finite values, labels, class counts, key-list hashes, and raw amplitude
+percentiles. It should be run before any paper-grade result is accepted. A
+62-channel provisional manifest can establish an exploratory mapped baseline,
+but it cannot prove that LMDB row 0 is `FP1`, row 1 is `FPZ`, and so on.
+
+The current two-GPU launchers do not enable `--dist_eval`; validation and test
+therefore use the sequential sampler on each rank. Do not enable distributed
+evaluation for final selection until prediction gathering or a non-padding
+evaluation sampler is implemented and tested.
