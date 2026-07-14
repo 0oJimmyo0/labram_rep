@@ -68,7 +68,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, log_writer=None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None, ch_names=None, is_binary=True):
+                    num_training_steps_per_epoch=None, update_freq=None, ch_names=None,
+                    is_binary=True, input_scale_divisor=100.0):
     input_chans = None
     if ch_names is not None:
         input_chans = utils.get_input_chans(ch_names)
@@ -108,7 +109,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if loss_scaler is not None and data_iter_step % update_freq == 0:
             adapter_step_snapshot = _snapshot_adapter_parameters(model)
 
-        samples = samples.float().to(device, non_blocking=True) / 100
+        samples = samples.float().to(device, non_blocking=True) / input_scale_divisor
         samples = ensure_patch_tensor(samples, patch_size=200)
         
         targets = targets.to(device, non_blocking=True)
@@ -236,7 +237,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=['acc'], is_binary=True):
+def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=['acc'],
+             is_binary=True, input_scale_divisor=100.0):
     input_chans = None
     if ch_names is not None:
         input_chans = utils.get_input_chans(ch_names)
@@ -255,7 +257,7 @@ def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=
     for step, batch in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         EEG = batch[0]
         target = batch[-1]
-        EEG = EEG.float().to(device, non_blocking=True) / 100
+        EEG = EEG.float().to(device, non_blocking=True) / input_scale_divisor
         EEG = ensure_patch_tensor(EEG, patch_size=200)
         target = target.to(device, non_blocking=True)
         if is_binary:
