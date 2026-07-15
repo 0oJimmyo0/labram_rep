@@ -47,6 +47,14 @@ RUN_ID="${RUN_ID:-seedv_labram_${LABRAM_ADAPTER_TYPE}_s${SEED}_b${BATCH_SIZE}_lr
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
 LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/$RUN_ID}"
 
+case "$SEED" in
+  42|1024|3407) ;;
+  *)
+    echo "ERROR: SEED-V runs must use the fixed seed packet {42, 1024, 3407}; got SEED=$SEED" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "$REPO_DIR/logs/out" "$REPO_DIR/logs/err" "$LOG_DIR"
 
 unset PYTHONPATH CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL

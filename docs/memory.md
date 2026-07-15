@@ -621,3 +621,10 @@ and separate Q/K/V/output-projection gradient norms. The unit test
 Pending SEED-V LR jobs were cancelled after this finding. Running jobs
 `12544353` and `12544354` were left to finish as partial controls. No depth or
 capacity experiments were submitted after the mechanism check.
+
+### Fixed SEED-V seed packet (2026-07-15)
+
+All SEED-V development, capacity, confirmation, and final paired runs use the
+fixed seed packet `{42, 1024, 3407}`. Do not replace it with `{0, 7, 2026}` or
+another alternative packet. This keeps the workload bounded and preserves the
+same paired comparison throughout the LaBraM evaluation.

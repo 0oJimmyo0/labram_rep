@@ -547,11 +547,13 @@ branch cannot perform temporal patch-to-patch interaction on SEED-V.
 The mixed LR screen is exploratory only. Do not add depth, more LR values, or
 test evaluation until the validation protocol is reconsidered.
 
-If a selected LR gives a positive mean paired validation effect, freeze the
-current core-fast recipe and confirm it on the prespecified untouched seeds
-`{0, 7, 2026}` before final test evaluation. If no LR is positive, retain the
-FACED patch result as the direct transfer result and run one bounded seed-3407
-capacity screen:
+Use the fixed seed packet `{42, 1024, 3407}` for every SEED-V development,
+capacity, and confirmation run. Do not introduce an alternative packet such as
+`{0, 7, 2026}`. If a selected LR gives a positive mean paired validation effect,
+freeze the current core-fast recipe and confirm it across the same fixed packet
+before final test evaluation. If no LR is positive, retain the FACED patch
+result as the direct transfer result and run one bounded seed-3407 capacity
+screen:
 
 ```text
 current core-fast patch reference
