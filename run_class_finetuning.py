@@ -65,11 +65,16 @@ def get_args():
                         choices=['none', 'channel', 'patch', 'channel_patch'],
                         help='LaBraM-native structured residual adapter branch.')
     parser.add_argument('--labram_adapter_bottleneck', default=64, type=int,
-                        help='Token-MLP bottleneck width for the optional LaBraM adapter MLP.')
+                        help='Bottleneck width for the optional token MLP or singleton patch residual.')
     parser.add_argument('--labram_adapter_heads', default=4, type=int,
                         help='Attention heads for channel-axis and patch-axis adapter mixers.')
     parser.add_argument('--labram_adapter_dropout', default=0.0, type=float,
-                        help='Dropout inside the LaBraM-native adapter.')
+                        help='Dropout inside attention weights and the optional token MLP.')
+    parser.add_argument('--labram_adapter_variant', default='full',
+                        choices=['full', 'output_dropout', 'bottleneck'],
+                        help='Patch branch variant: full attention, attention plus output dropout, or bottleneck residual.')
+    parser.add_argument('--labram_adapter_patch_output_dropout', default=0.0, type=float,
+                        help='Dropout applied to the patch branch output after attention.')
     parser.add_argument('--labram_adapter_init_alpha', default=0.01, type=float,
                         help='Initial scalar for each enabled adapter branch.')
     parser.add_argument('--labram_adapter_gamma', default=1.0, type=float,
@@ -260,6 +265,8 @@ def get_models(args):
         adapter_bottleneck=args.labram_adapter_bottleneck,
         adapter_num_heads=args.labram_adapter_heads,
         adapter_dropout=args.labram_adapter_dropout,
+        adapter_variant=args.labram_adapter_variant,
+        adapter_patch_output_dropout=args.labram_adapter_patch_output_dropout,
         adapter_init_alpha=args.labram_adapter_init_alpha,
         adapter_gamma=args.labram_adapter_gamma,
         adapter_seed=args.labram_adapter_seed,
@@ -516,9 +523,14 @@ def main(args, ds_init):
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    adapter_parameter_count = sum(
+        p.numel() for name, p in model_without_ddp.named_parameters()
+        if name.startswith('native_axis_adapter.')
+    )
 
     print("Model = %s" % str(model_without_ddp))
     print('number of params:', n_parameters)
+    print('adapter params:', adapter_parameter_count)
 
     total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
     num_training_steps_per_epoch = len(dataset_train) // total_batch_size
@@ -645,6 +657,14 @@ def main(args, ds_init):
         'warmup_epochs': int(args.warmup_epochs),
         'seed': int(args.seed),
         'adapter_type': args.labram_adapter_type,
+        'adapter_variant': args.labram_adapter_variant,
+        'adapter_patch_output_dropout': float(args.labram_adapter_patch_output_dropout),
+        'adapter_bottleneck': int(args.labram_adapter_bottleneck),
+        'adapter_heads': int(args.labram_adapter_heads),
+        'adapter_dropout': float(args.labram_adapter_dropout),
+        'adapter_gamma': float(args.labram_adapter_gamma),
+        'adapter_init_alpha': float(args.labram_adapter_init_alpha),
+        'adapter_parameter_count': int(adapter_parameter_count),
         'adapter_lr_scale': float(args.labram_adapter_lr_scale),
         'adapter_core_lr_scale': float(args.labram_adapter_lr_scale),
         'adapter_alpha_lr_scale': float(

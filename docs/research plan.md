@@ -569,3 +569,36 @@ gap, bounded residuals, and positive residual-on versus residual-off validation
 effects. Do not tune depth in this stage. A channel-only adapter remains a
 separate exploratory geometry control because SEED-V has 62 channels but one
 temporal patch.
+
+### Singleton capacity implementation gate (2026-07-15)
+
+The two capacity controls are explicit model variants rather than implicit
+behavior based on patch count:
+
+```text
+adapter_variant=output_dropout
+patch_output_dropout=0.1
+```
+
+keeps the full-width patch attention and applies dropout to its output after
+attention, while:
+
+```text
+adapter_variant=bottleneck
+adapter_bottleneck=64
+```
+
+replaces the patch attention branch with `200 -> 64 -> 200` after LayerNorm.
+The optional token MLP remains disabled. Both branches preserve adapter RNG
+isolation, gamma-zero parity, separate core/alpha optimizer groups, and
+validation-time dropout disabling. Run metadata records the exact variant and
+parameter count.
+
+Submit only two exploratory jobs on seed `3407`, using the current core-fast
+recipe and validation-only selection. A candidate must improve validation
+kappa by approximately `0.003` over the full-width reference, with compatible
+BA and weighted F1, a non-worse train-validation gap, controlled residuals,
+and positive residual-on versus residual-off validation effect. If a candidate
+survives, confirm it using the fixed packet `{42, 1024, 3407}`. Do not use
+`{0, 7, 2026}` or add depth, channel mixing, another bottleneck width, or more
+LR values during this stage.

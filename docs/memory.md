@@ -628,3 +628,27 @@ All SEED-V development, capacity, confirmation, and final paired runs use the
 fixed seed packet `{42, 1024, 3407}`. Do not replace it with `{0, 7, 2026}` or
 another alternative packet. This keeps the workload bounded and preserves the
 same paired comparison throughout the LaBraM evaluation.
+
+### Explicit SEED-V singleton capacity variants (2026-07-15)
+
+The patch branch now has an explicit `adapter_variant` control:
+
+- `full`: original full-width patch attention;
+- `output_dropout`: the same patch attention followed by separate output
+  dropout, with `patch_output_dropout=0.1` and attention dropout kept at zero;
+- `bottleneck`: replaces singleton patch attention with
+  `LayerNorm(200) -> Linear(200,64) -> GELU -> Linear(64,200)`.
+
+The bottleneck is explicit and does not activate automatically when `S=1`.
+Run configuration metadata records the variant, dropout, bottleneck width,
+parameter count, global/effective adapter learning rates, adapter seed, and
+commit. Preflight controls pass for dense/gamma-zero parity, shared
+initialization, variant parameter counts, eval-time dropout behavior, nonzero
+variant and gate gradients, optimizer groups, FACED parity, and SEED-V
+geometry.
+
+The next experiment is exactly two validation-only seed-3407 jobs: output
+dropout 0.1 and bottleneck-64, with no depth or additional LR sweep. The fixed
+study seed packet remains `{42, 1024, 3407}`; seed 3407 is an exploratory
+selection screen and any surviving candidate must be confirmed on the full
+fixed packet before test evaluation.

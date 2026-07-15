@@ -274,8 +274,30 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         use_patch_mixer=True,
         use_token_mlp=False,
         depth_dim=0,
+        patch_variant="full",
+        patch_output_dropout=0.0,
     ):
         super().__init__()
+        patch_variant = str(patch_variant).strip().lower()
+        if patch_variant not in {"full", "output_dropout", "bottleneck"}:
+            raise ValueError(
+                "patch_variant must be one of: full, output_dropout, bottleneck; "
+                f"got {patch_variant!r}"
+            )
+        if not 0.0 <= float(patch_output_dropout) < 1.0:
+            raise ValueError(
+                f"patch_output_dropout must be in [0, 1), got {patch_output_dropout!r}"
+            )
+        if int(bottleneck) <= 0:
+            raise ValueError(f"bottleneck must be positive, got {bottleneck!r}")
+        if patch_variant != "output_dropout" and float(patch_output_dropout) != 0.0:
+            raise ValueError(
+                "patch_output_dropout is only valid with patch_variant='output_dropout'"
+            )
+        if patch_variant != "full" and not use_patch_mixer:
+            raise ValueError("A non-full patch_variant requires use_patch_mixer=True")
+        self.patch_variant = patch_variant
+        self.patch_output_dropout_p = float(patch_output_dropout)
         self.depth_dim = int(depth_dim)
         self._last_raw_patch_ratio = None
         self._last_geometry = None
@@ -287,9 +309,18 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             self.alpha_channel = nn.Parameter(torch.tensor(float(init_alpha)))
 
         if use_patch_mixer:
-            self.patch_norm = nn.LayerNorm(dim)
-            self.patch_attn = nn.MultiheadAttention(
-                embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
+            if patch_variant in {"full", "output_dropout"}:
+                self.patch_norm = nn.LayerNorm(dim)
+                self.patch_attn = nn.MultiheadAttention(
+                    embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
+                self.patch_output_dropout = nn.Dropout(p=float(patch_output_dropout))
+            else:
+                self.singleton_patch_residual = nn.Sequential(
+                    nn.LayerNorm(dim),
+                    nn.Linear(dim, int(bottleneck)),
+                    nn.GELU(),
+                    nn.Linear(int(bottleneck), dim),
+                )
             self.alpha_patch = nn.Parameter(torch.tensor(float(init_alpha)))
 
         if use_token_mlp:
@@ -340,7 +371,15 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             xp = x.reshape(batch_size * channels, patches, dim)
             xp = self.patch_norm(xp)
             yp, _ = self.patch_attn(xp, xp, xp, need_weights=False)
+            yp = self.patch_output_dropout(yp)
             yp = yp.reshape(batch_size, channels, patches, dim)
+            self._last_raw_patch_ratio = float(
+                yp.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
+            )
+            delta = delta + self.alpha_patch * yp
+
+        if hasattr(self, "singleton_patch_residual"):
+            yp = self.singleton_patch_residual(x)
             self._last_raw_patch_ratio = float(
                 yp.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
             )
@@ -367,6 +406,7 @@ class NeuralTransformer(nn.Module):
                  use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False,
                  use_mean_pooling=True, init_scale=0.001, adapter_type="none",
                  adapter_bottleneck=64, adapter_num_heads=4, adapter_dropout=0.0,
+                 adapter_variant="full", adapter_patch_output_dropout=0.0,
                  adapter_init_alpha=0.01, adapter_gamma=1.0,
                  adapter_seed=12345,
                  adapter_use_token_mlp=False, adapter_depth_mode="none",
@@ -417,6 +457,24 @@ class NeuralTransformer(nn.Module):
         if adapter_depth_mode not in {"none", "lastk_delta"}:
             raise ValueError("adapter_depth_mode must be 'none' or 'lastk_delta'")
         self.adapter_type = adapter_type
+        self.adapter_variant = str(adapter_variant).strip().lower()
+        if self.adapter_variant not in {"full", "output_dropout", "bottleneck"}:
+            raise ValueError(
+                "adapter_variant must be one of: full, output_dropout, bottleneck; "
+                f"got {adapter_variant!r}"
+            )
+        self.adapter_patch_output_dropout = float(adapter_patch_output_dropout)
+        if not 0.0 <= self.adapter_patch_output_dropout < 1.0:
+            raise ValueError(
+                "adapter_patch_output_dropout must be in [0, 1), "
+                f"got {adapter_patch_output_dropout!r}"
+            )
+        if self.adapter_variant != "output_dropout" and self.adapter_patch_output_dropout != 0.0:
+            raise ValueError(
+                "adapter_patch_output_dropout is only valid with adapter_variant='output_dropout'"
+            )
+        if int(adapter_bottleneck) <= 0:
+            raise ValueError(f"adapter_bottleneck must be positive, got {adapter_bottleneck!r}")
         self.adapter_gamma = float(adapter_gamma)
         self.adapter_seed = int(adapter_seed)
         self.adapter_depth_mode = adapter_depth_mode
@@ -457,6 +515,8 @@ class NeuralTransformer(nn.Module):
                     use_patch_mixer=self.adapter_type in {"patch", "channel_patch"},
                     use_token_mlp=adapter_use_token_mlp,
                     depth_dim=embed_dim if self.adapter_depth_mode != "none" else 0,
+                    patch_variant=self.adapter_variant,
+                    patch_output_dropout=self.adapter_patch_output_dropout,
                 )
                 self.native_axis_adapter.apply(self._init_weights)
                 if self.native_axis_adapter.depth_gate is not None:
@@ -477,6 +537,8 @@ class NeuralTransformer(nn.Module):
             print(
                 "[LaBraM adapter] native structured residual enabled: "
                 f"type={self.adapter_type} gamma={self.adapter_gamma} "
+                f"variant={self.adapter_variant} patch_output_dropout={self.adapter_patch_output_dropout} "
+                f"bottleneck={adapter_bottleneck} "
                 f"token_mlp={bool(adapter_use_token_mlp)} "
                 f"depth_mode={self.adapter_depth_mode} depth_k={self.adapter_depth_k} "
                 f"fixed_alpha={self.adapter_fixed_alpha} "
