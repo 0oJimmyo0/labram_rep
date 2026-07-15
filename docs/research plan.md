@@ -535,3 +535,35 @@ The raw CNT reconstruction bridge remains unavailable locally because
 `EEG_raw`/CNT files were not found. It is a pre-final-test provenance task, not
 a reason to expand the validation workload now. No broad LR sweep is justified
 before this mapped dense-versus-patch comparison.
+
+### SEED-V geometry decision (2026-07-15)
+
+The singleton-patch mechanism check is complete. One real batch produces
+`(62, 1, 200)`, `input_time_window=1`, and adapter tokens `[B,62,1,200]`.
+Patch attention therefore has sequence length one: Q/K gradients are
+approximately zero while V/output gradients are nonzero. The current patch
+branch cannot perform temporal patch-to-patch interaction on SEED-V.
+
+The mixed LR screen is exploratory only. Do not add depth, more LR values, or
+test evaluation until the validation protocol is reconsidered.
+
+If a selected LR gives a positive mean paired validation effect, freeze the
+current core-fast recipe and confirm it on the prespecified untouched seeds
+`{0, 7, 2026}` before final test evaluation. If no LR is positive, retain the
+FACED patch result as the direct transfer result and run one bounded seed-3407
+capacity screen:
+
+```text
+current core-fast patch reference
+patch output dropout=0.1
+singleton-patch bottleneck residual: 200 -> 64 -> 200
+```
+
+The bottleneck condition replaces the full-width singleton patch-attention
+branch; it does not enable the existing optional token MLP. Carry at most one
+candidate to seeds `42` and `1024`, selected by validation kappa with BA and
+weighted F1 compatibility. Require a smaller patch-versus-dense generalization
+gap, bounded residuals, and positive residual-on versus residual-off validation
+effects. Do not tune depth in this stage. A channel-only adapter remains a
+separate exploratory geometry control because SEED-V has 62 channels but one
+temporal patch.

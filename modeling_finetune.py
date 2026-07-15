@@ -278,6 +278,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         super().__init__()
         self.depth_dim = int(depth_dim)
         self._last_raw_patch_ratio = None
+        self._last_geometry = None
 
         if use_channel_mixer:
             self.channel_norm = nn.LayerNorm(dim)
@@ -318,6 +319,14 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             raise ValueError(f"Expected [B,C,S,D], got {tuple(x.shape)}")
 
         batch_size, channels, patches, dim = x.shape
+        self._last_geometry = {
+            "adapter_batch_size": batch_size,
+            "adapter_channel_count": channels,
+            "adapter_patch_count": patches,
+            "adapter_embed_dim": dim,
+            "patch_attention_sequence_length": patches,
+            "patch_temporal_interactions_active": int(patches > 1),
+        }
         delta = torch.zeros_like(x)
 
         if hasattr(self, "channel_attn"):
@@ -514,6 +523,48 @@ class NeuralTransformer(nn.Module):
             diagnostics["adapter_delta_ratio"] = self._adapter_last_delta_ratio
         if self._adapter_last_raw_patch_ratio is not None:
             diagnostics["raw_patch_ratio"] = self._adapter_last_raw_patch_ratio
+        if self.native_axis_adapter._last_geometry is not None:
+            diagnostics.update(self.native_axis_adapter._last_geometry)
+
+        def grad_norm(*parameters):
+            squared_norm = 0.0
+            for parameter in parameters:
+                if parameter is not None and parameter.grad is not None:
+                    squared_norm += float(parameter.grad.detach().float().pow(2).sum().cpu())
+            return squared_norm ** 0.5
+
+        def grad_slice_norm(parameter, start, end):
+            if parameter is None or parameter.grad is None:
+                return 0.0
+            return float(parameter.grad.detach().float()[start:end].pow(2).sum().sqrt().cpu())
+
+        patch_attn = getattr(self.native_axis_adapter, "patch_attn", None)
+        if patch_attn is not None:
+            embed_dim = patch_attn.embed_dim
+            in_proj_weight = patch_attn.in_proj_weight
+            in_proj_bias = patch_attn.in_proj_bias
+            diagnostics["patch_q_grad_norm"] = (
+                grad_slice_norm(in_proj_weight, 0, embed_dim)
+                ** 2
+                + grad_slice_norm(in_proj_bias, 0, embed_dim)
+                ** 2
+            ) ** 0.5
+            diagnostics["patch_k_grad_norm"] = (
+                grad_slice_norm(in_proj_weight, embed_dim, 2 * embed_dim)
+                ** 2
+                + grad_slice_norm(in_proj_bias, embed_dim, 2 * embed_dim)
+                ** 2
+            ) ** 0.5
+            diagnostics["patch_v_grad_norm"] = (
+                grad_slice_norm(in_proj_weight, 2 * embed_dim, 3 * embed_dim)
+                ** 2
+                + grad_slice_norm(in_proj_bias, 2 * embed_dim, 3 * embed_dim)
+                ** 2
+            ) ** 0.5
+            diagnostics["patch_output_projection_grad_norm"] = grad_norm(
+                patch_attn.out_proj.weight,
+                patch_attn.out_proj.bias,
+            )
         adapter_grad_sq = 0.0
         adapter_core_grad_sq = 0.0
         alpha_grad_sq = 0.0

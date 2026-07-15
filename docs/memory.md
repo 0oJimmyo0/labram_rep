@@ -589,3 +589,35 @@ wins, and compatible BA/weighted F1. Test depth only after that gate, using a
 fresh patch comparator on the exact depth commit. The raw CNT bridge remains
 unavailable locally and should be completed before final test evaluation, not
 by expanding the current validation workload.
+
+### Verified SEED-V singleton-patch mechanism (2026-07-15)
+
+The SEED-V mechanism check used one real LMDB batch and confirmed:
+
+```text
+sample_shape=(2, 62, 1, 200)
+input_time_window=1
+token_grid=[B,62,1,200]
+patch_attention_sequence_length=1
+patch_temporal_interactions_active=0
+patch_q_grad_norm=1.35e-13
+patch_k_grad_norm=1.38e-13
+patch_v_grad_norm=1.78e-05
+patch_output_projection_grad_norm=4.14e-05
+```
+
+With one temporal patch, the patch-attention softmax has one element and cannot
+perform temporal patch selection. The branch remains a valid residual value and
+output projection, but it is not temporal patch-to-patch mixing on SEED-V.
+This is a geometry boundary condition, not an input NaN, channel-count, or
+checkpoint-loading failure.
+
+The implementation now records the input time window, adapter token-grid
+dimensions, patch sequence length, whether temporal interactions are active,
+and separate Q/K/V/output-projection gradient norms. The unit test
+`tests/test_seedv_patch_geometry.py` and real-batch diagnostic
+`tests/test_seedv_real_patch_geometry.py` protect this interpretation.
+
+Pending SEED-V LR jobs were cancelled after this finding. Running jobs
+`12544353` and `12544354` were left to finish as partial controls. No depth or
+capacity experiments were submitted after the mechanism check.

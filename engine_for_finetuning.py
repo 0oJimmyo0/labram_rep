@@ -111,6 +111,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         optimizer.zero_grad()
 
     adapter_step_snapshot = None
+    geometry_reported = False
 
     for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
@@ -131,6 +132,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         samples = samples.float().to(device, non_blocking=True) / input_scale_divisor
         samples = ensure_patch_tensor(samples, patch_size=200)
+        input_time_window = samples.shape[2] if samples.shape[-1] == 200 else samples.shape[-1]
         
         targets = targets.to(device, non_blocking=True)
         if is_binary:
@@ -152,6 +154,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             sys.exit(1)
 
         adapter_diagnostics = {
+            'input_time_window': float(input_time_window),
             'input_finite': float(torch.isfinite(samples).all()),
             'input_nonfinite_count': float((~torch.isfinite(samples)).sum()),
             'input_max_abs': float(samples.detach().abs().amax().cpu()),
@@ -197,6 +200,24 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 # NativeScaler performs backward, unscaling, and optimizer.step,
                 # but it does not clear gradients. Capture them before zero_grad.
                 adapter_diagnostics.update(core_model.get_adapter_diagnostics())
+                if (
+                    not geometry_reported
+                    and utils.is_main_process()
+                    and 'patch_attention_sequence_length' in adapter_diagnostics
+                ):
+                    print(
+                        "[LaBraM adapter geometry] "
+                        f"input_shape={tuple(samples.shape)} "
+                        f"token_grid=[B,{int(adapter_diagnostics['adapter_channel_count'])},"
+                        f"{int(adapter_diagnostics['adapter_patch_count'])},"
+                        f"{int(adapter_diagnostics['adapter_embed_dim'])}] "
+                        f"patch_attention_sequence_length="
+                        f"{int(adapter_diagnostics['patch_attention_sequence_length'])} "
+                        f"temporal_interactions="
+                        f"{int(adapter_diagnostics['patch_temporal_interactions_active'])}",
+                        flush=True,
+                    )
+                    geometry_reported = True
             if (data_iter_step + 1) % update_freq == 0 and adapter_step_snapshot is not None:
                 update_norms = _parameter_update_norms(model, adapter_step_snapshot)
                 for category, (absolute_norm, relative_norm) in update_norms.items():
