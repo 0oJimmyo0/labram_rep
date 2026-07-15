@@ -33,29 +33,49 @@ def train_class_batch(model, samples, target, criterion, ch_names):
     return loss, outputs
 
 
-def _snapshot_adapter_parameters(model):
+def _snapshot_update_parameters(model):
     core_model = model.module if hasattr(model, 'module') else model
-    return {
-        name: parameter.detach().clone()
-        for name, parameter in core_model.named_parameters()
-        if name.startswith('native_axis_adapter.') and parameter.requires_grad
-    }
+    last_block_prefix = f"blocks.{len(core_model.blocks) - 1}."
+    snapshot = {}
+    for name, parameter in core_model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        if name.startswith('native_axis_adapter.alpha_'):
+            category = 'alpha'
+        elif name.startswith('native_axis_adapter.'):
+            category = 'adapter_core'
+        elif name.startswith(last_block_prefix):
+            category = 'last_block'
+        elif name.startswith('head.'):
+            category = 'classifier'
+        else:
+            continue
+        snapshot[name] = (parameter.detach().clone(), category)
+    return snapshot
 
 
-def _adapter_update_norms(model, snapshot):
+def _parameter_update_norms(model, snapshot):
     core_model = model.module if hasattr(model, 'module') else model
     current = dict(core_model.named_parameters())
-    core_sq = 0.0
-    alpha_sq = 0.0
-    for name, before in snapshot.items():
+    stats = {
+        category: {'update_sq': 0.0, 'parameter_sq': 0.0}
+        for category in ('adapter_core', 'alpha', 'last_block', 'classifier')
+    }
+    for name, (before, category) in snapshot.items():
         if name not in current:
             continue
-        update_sq = float((current[name].detach() - before).float().pow(2).sum().cpu())
-        if name.startswith('native_axis_adapter.alpha_'):
-            alpha_sq += update_sq
-        else:
-            core_sq += update_sq
-    return core_sq ** 0.5, alpha_sq ** 0.5
+        parameter = current[name].detach().float()
+        update_sq = float((parameter - before).pow(2).sum().cpu())
+        parameter_sq = float(before.float().pow(2).sum().cpu())
+        stats[category]['update_sq'] += update_sq
+        stats[category]['parameter_sq'] += parameter_sq
+    return {
+        category: (
+            values['update_sq'] ** 0.5,
+            values['update_sq'] ** 0.5 / (values['parameter_sq'] ** 0.5 + 1e-12),
+        )
+        for category, values in stats.items()
+    }
 
 
 def get_loss_scale_for_deepspeed(model):
@@ -107,7 +127,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     param_group["weight_decay"] = wd_schedule_values[it]
 
         if loss_scaler is not None and data_iter_step % update_freq == 0:
-            adapter_step_snapshot = _snapshot_adapter_parameters(model)
+            adapter_step_snapshot = _snapshot_update_parameters(model)
 
         samples = samples.float().to(device, non_blocking=True) / input_scale_divisor
         samples = ensure_patch_tensor(samples, patch_size=200)
@@ -178,10 +198,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 # but it does not clear gradients. Capture them before zero_grad.
                 adapter_diagnostics.update(core_model.get_adapter_diagnostics())
             if (data_iter_step + 1) % update_freq == 0 and adapter_step_snapshot is not None:
-                core_update_norm, alpha_update_norm = _adapter_update_norms(
-                    model, adapter_step_snapshot)
-                adapter_diagnostics['adapter_core_update_norm'] = core_update_norm
-                adapter_diagnostics['alpha_update_norm'] = alpha_update_norm
+                update_norms = _parameter_update_norms(model, adapter_step_snapshot)
+                for category, (absolute_norm, relative_norm) in update_norms.items():
+                    adapter_diagnostics[f'{category}_update_norm'] = absolute_norm
+                    adapter_diagnostics[f'{category}_relative_update_norm'] = relative_norm
                 adapter_step_snapshot = None
             if (data_iter_step + 1) % update_freq == 0:
                 optimizer.zero_grad()
