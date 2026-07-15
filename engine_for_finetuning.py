@@ -131,7 +131,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
 
-        adapter_diagnostics = {}
+        adapter_diagnostics = {
+            'input_finite': float(torch.isfinite(samples).all()),
+            'input_nonfinite_count': float((~torch.isfinite(samples)).sum()),
+            'input_max_abs': float(samples.detach().abs().amax().cpu()),
+            'output_finite': float(torch.isfinite(output).all()),
+            'output_nonfinite_count': float((~torch.isfinite(output)).sum()),
+            'output_max_abs': float(output.detach().abs().amax().cpu()),
+        }
         core_model = model.module if hasattr(model, 'module') else model
 
         if loss_scaler is None:
@@ -153,10 +160,23 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
                                     parameters=model.parameters(), create_graph=is_second_order,
                                     update_grad=(data_iter_step + 1) % update_freq == 0)
+            adapter_diagnostics.update({
+                'amp_grad_finite': float(loss_scaler.last_grad_finite),
+                'amp_step_skipped': float(loss_scaler.last_step_skipped),
+                'amp_nonfinite_param_count': float(loss_scaler.last_nonfinite_param_count),
+                'amp_scale_before': float(loss_scaler.last_scale_before),
+                'amp_scale_after': float(loss_scaler.last_scale_after),
+            })
+            if loss_scaler.last_nonfinite_group_names:
+                print(
+                    "AMP nonfinite gradient groups: "
+                    + ",".join(loss_scaler.last_nonfinite_group_names),
+                    flush=True,
+                )
             if hasattr(core_model, 'get_adapter_diagnostics'):
                 # NativeScaler performs backward, unscaling, and optimizer.step,
                 # but it does not clear gradients. Capture them before zero_grad.
-                adapter_diagnostics = core_model.get_adapter_diagnostics()
+                adapter_diagnostics.update(core_model.get_adapter_diagnostics())
             if (data_iter_step + 1) % update_freq == 0 and adapter_step_snapshot is not None:
                 core_update_norm, alpha_update_norm = _adapter_update_norms(
                     model, adapter_step_snapshot)

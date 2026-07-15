@@ -115,6 +115,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 scale *= adapter_lr_scale
 
             parameter_group_names[group_name] = {
+                "group_name": group_name,
                 "weight_decay": this_weight_decay,
                 "params": [],
                 "lr_scale": scale,
@@ -123,6 +124,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
             }
             parameter_group_vars[group_name] = {
+                "group_name": group_name,
                 "weight_decay": this_weight_decay,
                 "params": [],
                 "lr_scale": scale,

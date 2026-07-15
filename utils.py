@@ -517,10 +517,23 @@ class NativeScalerWithGradNormCount:
 
     def __init__(self):
         self._scaler = torch.amp.GradScaler("cuda")
+        self.last_grad_finite = True
+        self.last_step_skipped = False
+        self.last_nonfinite_param_count = 0
+        self.last_nonfinite_group_names = []
+        self.last_scale_before = self._scaler.get_scale()
+        self.last_scale_after = self.last_scale_before
 
     def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True, layer_names=None):
+        self.last_grad_finite = True
+        self.last_step_skipped = False
+        self.last_nonfinite_param_count = 0
+        self.last_nonfinite_group_names = []
+        self.last_scale_before = self._scaler.get_scale()
         self._scaler.scale(loss).backward(create_graph=create_graph)
         if update_grad:
+            nonfinite_group_names = set()
+            nonfinite_param_count = 0
             if clip_grad is not None:
                 assert parameters is not None
                 self._scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
@@ -528,10 +541,22 @@ class NativeScalerWithGradNormCount:
             else:
                 self._scaler.unscale_(optimizer)
                 norm = get_grad_norm_(parameters, layer_names=layer_names)
+            for group in optimizer.param_groups:
+                group_name = group.get("group_name", "unknown")
+                for parameter in group["params"]:
+                    if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
+                        nonfinite_param_count += 1
+                        nonfinite_group_names.add(group_name)
+            self.last_nonfinite_param_count = nonfinite_param_count
+            self.last_nonfinite_group_names = sorted(nonfinite_group_names)
+            self.last_grad_finite = nonfinite_param_count == 0
             self._scaler.step(optimizer)
             self._scaler.update()
+            self.last_scale_after = self._scaler.get_scale()
+            self.last_step_skipped = self.last_scale_after < self.last_scale_before
         else:
             norm = None
+            self.last_scale_after = self._scaler.get_scale()
         return norm
 
     def state_dict(self):
