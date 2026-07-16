@@ -652,3 +652,24 @@ dropout 0.1 and bottleneck-64, with no depth or additional LR sweep. The fixed
 study seed packet remains `{42, 1024, 3407}`; seed 3407 is an exploratory
 selection screen and any surviving candidate must be confirmed on the full
 fixed packet before test evaluation.
+
+### SEED-V channel-axis control (2026-07-15)
+
+The real-batch channel-only mechanism check passes on `(2,62,1,200)`:
+
+```text
+channel_attention_sequence_length=62
+channel_q_grad_norm=1.51e-06
+channel_k_grad_norm=1.52e-06
+channel_v_grad_norm=1.88e-05
+channel_output_projection_grad_norm=4.71e-05
+raw_channel_ratio=0.221
+```
+
+The patch branch is absent, so this restores a meaningful EEG axis without
+changing the residual placement or dense backbone. Synthetic channel geometry,
+LaBraM gamma-zero parity, and FACED parity also pass. The next bounded screen
+is dense versus channel-only at global LR `1e-4` and `5e-4`, all on seed `3407`,
+with batch size `32`, warmup `5`, 40 epochs, core LR scale `1.0`, alpha LR
+scale `0.1`, alpha init `0.01`, depth off, token MLP off, and test disabled.
+Any candidate must later be confirmed on the fixed packet `{42, 1024, 3407}`.

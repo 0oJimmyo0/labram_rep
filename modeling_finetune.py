@@ -300,6 +300,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         self.patch_output_dropout_p = float(patch_output_dropout)
         self.depth_dim = int(depth_dim)
         self._last_raw_patch_ratio = None
+        self._last_raw_channel_ratio = None
         self._last_geometry = None
 
         if use_channel_mixer:
@@ -365,6 +366,9 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             xc = self.channel_norm(xc)
             yc, _ = self.channel_attn(xc, xc, xc, need_weights=False)
             yc = yc.reshape(batch_size, patches, channels, dim).permute(0, 2, 1, 3)
+            self._last_raw_channel_ratio = float(
+                yc.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
+            )
             delta = delta + self.alpha_channel * yc
 
         if hasattr(self, "patch_attn"):
@@ -484,6 +488,7 @@ class NeuralTransformer(nn.Module):
         self.native_axis_adapter = None
         self._adapter_last_delta_ratio = None
         self._adapter_last_raw_patch_ratio = None
+        self._adapter_last_raw_channel_ratio = None
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=.02)
@@ -585,6 +590,8 @@ class NeuralTransformer(nn.Module):
             diagnostics["adapter_delta_ratio"] = self._adapter_last_delta_ratio
         if self._adapter_last_raw_patch_ratio is not None:
             diagnostics["raw_patch_ratio"] = self._adapter_last_raw_patch_ratio
+        if self._adapter_last_raw_channel_ratio is not None:
+            diagnostics["raw_channel_ratio"] = self._adapter_last_raw_channel_ratio
         if self.native_axis_adapter._last_geometry is not None:
             diagnostics.update(self.native_axis_adapter._last_geometry)
 
@@ -626,6 +633,36 @@ class NeuralTransformer(nn.Module):
             diagnostics["patch_output_projection_grad_norm"] = grad_norm(
                 patch_attn.out_proj.weight,
                 patch_attn.out_proj.bias,
+            )
+        channel_attn = getattr(self.native_axis_adapter, "channel_attn", None)
+        if channel_attn is not None:
+            embed_dim = channel_attn.embed_dim
+            in_proj_weight = channel_attn.in_proj_weight
+            in_proj_bias = channel_attn.in_proj_bias
+            diagnostics["channel_attention_sequence_length"] = float(
+                self.native_axis_adapter._last_geometry["adapter_channel_count"]
+            )
+            diagnostics["channel_q_grad_norm"] = (
+                grad_slice_norm(in_proj_weight, 0, embed_dim)
+                ** 2
+                + grad_slice_norm(in_proj_bias, 0, embed_dim)
+                ** 2
+            ) ** 0.5
+            diagnostics["channel_k_grad_norm"] = (
+                grad_slice_norm(in_proj_weight, embed_dim, 2 * embed_dim)
+                ** 2
+                + grad_slice_norm(in_proj_bias, embed_dim, 2 * embed_dim)
+                ** 2
+            ) ** 0.5
+            diagnostics["channel_v_grad_norm"] = (
+                grad_slice_norm(in_proj_weight, 2 * embed_dim, 3 * embed_dim)
+                ** 2
+                + grad_slice_norm(in_proj_bias, 2 * embed_dim, 3 * embed_dim)
+                ** 2
+            ) ** 0.5
+            diagnostics["channel_output_projection_grad_norm"] = grad_norm(
+                channel_attn.out_proj.weight,
+                channel_attn.out_proj.bias,
             )
         adapter_grad_sq = 0.0
         adapter_core_grad_sq = 0.0
@@ -720,6 +757,8 @@ class NeuralTransformer(nn.Module):
 
     def forward_features_with_adapter(self, x, input_chans=None, return_patch_tokens=False, return_all_tokens=False, **kwargs):
         self._adapter_last_delta_ratio = None
+        self._adapter_last_raw_patch_ratio = None
+        self._adapter_last_raw_channel_ratio = None
         batch_size, n, a, t = x.shape
         input_time_window = a if t == self.patch_size else t
         x = self.patch_embed(x)
@@ -761,6 +800,9 @@ class NeuralTransformer(nn.Module):
             correction = self.adapter_gamma * delta_grid.reshape(batch_size, expected_tokens, -1)
             self._adapter_last_raw_patch_ratio = getattr(
                 self.native_axis_adapter, "_last_raw_patch_ratio", None
+            )
+            self._adapter_last_raw_channel_ratio = getattr(
+                self.native_axis_adapter, "_last_raw_channel_ratio", None
             )
             self._adapter_last_delta_ratio = float(
                 correction.detach().float().norm().div(patch_tokens.detach().float().norm().clamp_min(1e-12)).cpu()

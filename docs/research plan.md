@@ -602,3 +602,39 @@ and positive residual-on versus residual-off validation effect. If a candidate
 survives, confirm it using the fixed packet `{42, 1024, 3407}`. Do not use
 `{0, 7, 2026}` or add depth, channel mixing, another bottleneck width, or more
 LR values during this stage.
+
+### Geometry-matched SEED-V channel control (2026-07-15)
+
+The singleton-patch result is a valid frozen-transfer result, but it is not an
+equivalent structural experiment to FACED: FACED supplies ten temporal patches,
+whereas SEED-V supplies one. A channel-only control is therefore justified as
+one bounded geometry-matched rework:
+
+```text
+FACED:  adapter_type=patch,   sequence axis=S=10
+SEED-V: adapter_type=channel, sequence axis=C=62
+```
+
+The real SEED-V check confirms channel sequence length `62` and nonzero Q/K/V
+and output-projection gradients, with no patch branch. It preserves the
+pre-norm residual placement, dense path, alpha initialization, optimizer-group
+separation, and validation-kappa selection protocol.
+
+Run only four seed-3407 validation-only conditions on one clean commit:
+
+```text
+dense        LR=1e-4
+channel-only LR=1e-4
+dense        LR=5e-4
+channel-only LR=5e-4
+```
+
+Use batch size `32`, 40 epochs, warmup `5`, weight decay `0.03`, layer decay
+`0.65`, drop path `0.1`, alpha init `0.01`, core LR scale `1.0`, alpha LR scale
+`0.1`, token MLP off, patch off, depth off, and test off. Advance only with
+approximately `+0.005` validation kappa over matched dense, compatible BA and
+weighted F1, bounded residual activity, positive channel-on versus channel-off
+validation effect, and no larger train-validation gap. If it passes, confirm
+the frozen recipe on seeds `42` and `1024`, preserving the fixed packet
+`{42, 1024, 3407}`. Do not combine channel and patch branches or add depth in
+this screen.
