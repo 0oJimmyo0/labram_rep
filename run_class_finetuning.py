@@ -223,6 +223,8 @@ def get_args():
                         help='dataset: TUAB | TUEV | SEED-V | FACED')
     parser.add_argument('--data_path', default='',
                         help='path to the preprocessed TUAB/TUEV dataset root')
+    parser.add_argument('--seedv_channel_manifest', default='',
+                        help='validated SEED-V channel manifest JSON path')
     parser.add_argument('--input_scale_divisor', default=100.0, type=float,
                         help='Divide stored SEED-V/FACED samples by this value before LaBraM. Use 1 to preserve raw scale.')
 
@@ -287,6 +289,16 @@ def shared_parameter_checksum(model):
     return digest.hexdigest()
 
 
+def _sha256_file(path):
+    if not path or not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def get_dataset(args):
     if not args.data_path:
         raise ValueError("--data_path must point to the preprocessed dataset root")
@@ -306,18 +318,15 @@ def get_dataset(args):
         args.nb_classes = 6
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
     elif dataset_name in {'SEED-V', 'SEEDV'}:
-        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(args.data_path)
+        train_dataset, test_dataset, val_dataset = utils.prepare_SEEDV_dataset(
+            args.data_path,
+            channel_manifest=args.seedv_channel_manifest or None,
+        )
         ch_names = getattr(train_dataset, "get_ch_names", lambda: None)()
         if ch_names is None:
-            # The current LMDB stores the correct tensor shape (62, 1, 200), but not an
-            # explicit channel-name manifest. We therefore preserve the stored tensor
-            # order as-is and let LaBraM consume exactly the observed 62 channel slots,
-            # rather than inventing a channel permutation or expanding to unused slots.
-            warnings.warn(
-                "SEED-V channel names are not encoded in the current LMDB/schema sidecars; "
-                "LaBraM will consume the stored 62-channel tensor order directly until "
-                "an explicit channel-order manifest is provided.",
-                RuntimeWarning,
+            raise RuntimeError(
+                "SEED-V LaBraM runs require a validated channel manifest matching the stored tensor. "
+                "Provide --seedv_channel_manifest or place channel_names.json beside the LMDB."
             )
         else:
             print(f"Loaded SEED-V channel manifest with {len(ch_names)} channels.")
@@ -612,7 +621,32 @@ def main(args, ds_init):
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         git_commit = 'unknown'
+    channel_manifest_sha256 = None
+    channel_manifest_file_sha256 = _sha256_file(args.seedv_channel_manifest)
+    checkpoint_sha256 = _sha256_file(args.finetune)
+    input_chans = None
+    if ch_names is not None:
+        channel_manifest_sha256 = hashlib.sha256(
+            json.dumps(ch_names, ensure_ascii=True, separators=(',', ':')).encode('utf-8')
+        ).hexdigest()
+        input_chans = utils.get_input_chans(ch_names)
+    split_metadata = {}
+    if str(args.dataset).upper().replace('_', '-') in {'SEED-V', 'SEEDV'}:
+        for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
+            if hasattr(dataset, 'split_metadata'):
+                split_metadata[split_name] = dataset.split_metadata()
     run_config = {
+        'dataset': str(args.dataset),
+        'data_path': os.path.abspath(args.data_path) if args.data_path else '',
+        'input_scale_divisor': float(args.input_scale_divisor),
+        'seedv_channel_manifest': os.path.abspath(args.seedv_channel_manifest) if args.seedv_channel_manifest else '',
+        'channel_names': ch_names,
+        'input_chans': input_chans,
+        'channel_manifest_sha256': channel_manifest_sha256,
+        'channel_manifest_file_sha256': channel_manifest_file_sha256,
+        'pretrained_checkpoint': os.path.abspath(args.finetune) if args.finetune else '',
+        'pretrained_checkpoint_sha256': checkpoint_sha256,
+        'dataset_split_metadata': split_metadata,
         'requested_lr_string': args.requested_lr_string or str(args.lr),
         'parsed_args_lr': float(args.lr),
         'max_scheduled_lr': max_scheduled_lr,

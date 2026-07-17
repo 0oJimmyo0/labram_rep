@@ -10,6 +10,7 @@
 # ---------------------------------------------------------
 
 import io
+import hashlib
 import os
 import math
 import time
@@ -811,10 +812,20 @@ def prepare_TUEV_dataset(root):
 
 
 class SEEDVLoader(torch.utils.data.Dataset):
-    def __init__(self, root, mode="train"):
+    expected_shape = None
+    label_min = 0
+    label_max = 4
+
+    def __init__(self, root, mode="train", channel_manifest=None, expected_shape=None):
         self.root = root
         self.mode = mode
-        self.channel_names = read_seedv_channel_names(root)
+        self.expected_shape = tuple(expected_shape) if expected_shape is not None else None
+        self.channel_names = read_seedv_channel_names(root, manifest_path=channel_manifest)
+        if self.channel_names is None:
+            raise RuntimeError(
+                "SEED-V requires a validated channel manifest matching the stored tensor. "
+                "Provide channel_names.json beside the LMDB or pass an explicit manifest path."
+            )
         try:
             import lmdb  # local import so non-LMDB datasets do not require it
         except ImportError as exc:
@@ -832,12 +843,63 @@ class SEEDVLoader(torch.utils.data.Dataset):
         if mode not in split_index:
             raise KeyError(f"SEED-V LMDB missing split {mode!r}; available: {list(split_index.keys())}")
         self.keys = split_index[mode]
+        if not self.keys:
+            raise ValueError(f"SEED-V split {mode!r} is empty in {root}")
+
+        first_key = self.keys[0]
+        first_key = first_key.encode() if isinstance(first_key, str) else first_key
+        with lmdb.open(root, readonly=True, lock=False, readahead=False, meminit=False).begin(write=False) as txn:
+            first_raw = txn.get(first_key)
+        if first_raw is None:
+            raise KeyError(f"SEED-V LMDB key not found: {self.keys[0]!r}")
+        first_shape = self._validate_sample(pickle.loads(first_raw), self.keys[0])
+        self.channel_count = first_shape[0]
+        self.sample_shape = first_shape
+        if len(self.channel_names) != self.channel_count:
+            raise RuntimeError(
+                f"SEED-V manifest has {len(self.channel_names)} channels but stored samples have "
+                f"{self.channel_count}; provide a manifest for the actual tensor order."
+            )
 
     def __len__(self):
         return len(self.keys)
 
     def get_ch_names(self):
         return self.channel_names
+
+    def _validate_sample(self, sample, key):
+        if "sample" not in sample or "label" not in sample:
+            raise ValueError(f"SEED-V record {key!r} must contain sample and label fields")
+        X = np.asarray(sample["sample"])
+        expected_shape = self.expected_shape or (X.shape[0], 1, 200)
+        if tuple(X.shape) != expected_shape:
+            raise ValueError(
+                f"SEED-V record {key!r} expected shape {expected_shape}, got {tuple(X.shape)}"
+            )
+        if not np.isfinite(X).all():
+            raise ValueError(f"SEED-V record {key!r} contains NaN or Inf")
+        label_values = np.asarray(sample["label"]).reshape(-1)
+        if label_values.size != 1:
+            raise ValueError(f"SEED-V record {key!r} must contain one scalar label, got {label_values.shape}")
+        label = int(label_values[0])
+        if not self.label_min <= label <= self.label_max:
+            raise ValueError(
+                f"SEED-V record {key!r} label must be in [{self.label_min}, {self.label_max}], got {label}"
+            )
+        return tuple(X.shape)
+
+    def split_metadata(self):
+        digest = hashlib.sha256()
+        for key in self.keys:
+            encoded = key.encode("utf-8") if isinstance(key, str) else bytes(key)
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        return {
+            "mode": self.mode,
+            "sample_count": len(self.keys),
+            "key_sha256": digest.hexdigest(),
+            "sample_shape": list(self.sample_shape),
+        }
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -864,20 +926,20 @@ class SEEDVLoader(torch.utils.data.Dataset):
         if raw is None:
             raise KeyError(f"SEED-V LMDB key not found: {key!r}")
         sample = pickle.loads(raw)
-        X = sample["sample"]
-        if X.ndim != 3:
-            raise ValueError(f"Expected SEED-V sample with shape (channels, patches, 200), got {X.shape}")
-        Y = int(sample["label"])
+        self._validate_sample(sample, key)
+        X = np.asarray(sample["sample"])
+        Y = int(np.asarray(sample["label"]).reshape(-1)[0])
         # The finetuning engine owns the native LaBraM input scaling. Keeping
         # the dataset raw prevents applying the divisor twice.
         X = torch.FloatTensor(X)
         return X, Y
 
 
-def prepare_SEEDV_dataset(root):
-    train_dataset = SEEDVLoader(root, mode="train")
-    val_dataset = SEEDVLoader(root, mode="val")
-    test_dataset = SEEDVLoader(root, mode="test")
+def prepare_SEEDV_dataset(root, channel_manifest=None):
+    expected_shape = (62, 1, 200)
+    train_dataset = SEEDVLoader(root, mode="train", channel_manifest=channel_manifest, expected_shape=expected_shape)
+    val_dataset = SEEDVLoader(root, mode="val", channel_manifest=channel_manifest, expected_shape=expected_shape)
+    test_dataset = SEEDVLoader(root, mode="test", channel_manifest=channel_manifest, expected_shape=expected_shape)
     print(len(train_dataset), len(val_dataset), len(test_dataset))
     return train_dataset, test_dataset, val_dataset
 
@@ -1037,16 +1099,21 @@ def _normalize_labram_channel_name(ch_name: str) -> str:
     return alias_map.get(key, key)
 
 
-def _validate_channel_names(channel_names, root, dataset_name: str, expected_count: int):
+def _validate_channel_names(channel_names, root, dataset_name: str, expected_count: Optional[int] = None):
     if channel_names is None:
         return None
     if not isinstance(channel_names, (list, tuple)):
         warnings.warn(f"{dataset_name} channel manifest at {root} is not a list/tuple; ignoring it.")
         return None
     normalized = [_normalize_labram_channel_name(ch) for ch in channel_names if str(ch).strip()]
-    if len(normalized) != expected_count:
+    if expected_count is not None and len(normalized) != expected_count:
         warnings.warn(
             f"{dataset_name} channel manifest for {root} has {len(normalized)} channels instead of {expected_count}; ignoring it."
+        )
+        return None
+    if len(set(normalized)) != len(normalized):
+        warnings.warn(
+            f"{dataset_name} channel manifest for {root} contains duplicate channel names; ignoring it."
         )
         return None
     missing = [ch for ch in normalized if ch not in standard_1020]
@@ -1058,8 +1125,8 @@ def _validate_channel_names(channel_names, root, dataset_name: str, expected_cou
     return normalized
 
 
-def _validate_seedv_channel_names(channel_names, root):
-    return _validate_channel_names(channel_names, root, "SEED-V", 62)
+def _validate_seedv_channel_names(channel_names, root, expected_count=None):
+    return _validate_channel_names(channel_names, root, "SEED-V", expected_count)
 
 
 def _extract_channel_names_payload(payload):
@@ -1074,7 +1141,7 @@ def _extract_channel_names_payload(payload):
     return None
 
 
-def read_seedv_channel_names(root) -> Optional[list]:
+def read_seedv_channel_names(root, manifest_path=None, expected_count=None) -> Optional[list]:
     candidate_keys = [
         b"__channel_names__",
         b"channel_names",
@@ -1082,6 +1149,7 @@ def read_seedv_channel_names(root) -> Optional[list]:
         b"channels",
     ]
     candidate_files = [
+        manifest_path,
         root + "_channel_names.json",
         root + "_channel_names.pkl",
         root + "_metadata.json",
@@ -1110,14 +1178,16 @@ def read_seedv_channel_names(root) -> Optional[list]:
                             channel_names = json.loads(raw.decode("utf-8"))
                         except Exception:
                             channel_names = None
-                    channel_names = _validate_seedv_channel_names(_extract_channel_names_payload(channel_names), root)
+                    channel_names = _validate_seedv_channel_names(
+                        _extract_channel_names_payload(channel_names), root, expected_count
+                    )
                     if channel_names is not None:
                         return channel_names
         except Exception:
             pass
 
     for path in candidate_files:
-        if not os.path.isfile(path):
+        if not path or not os.path.isfile(path):
             continue
         try:
             if path.endswith(".json"):
@@ -1131,7 +1201,7 @@ def read_seedv_channel_names(root) -> Optional[list]:
 
         channel_names = _extract_channel_names_payload(payload)
 
-        channel_names = _validate_seedv_channel_names(channel_names, root)
+        channel_names = _validate_seedv_channel_names(channel_names, root, expected_count)
         if channel_names is not None:
             return channel_names
 

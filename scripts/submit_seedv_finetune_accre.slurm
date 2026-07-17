@@ -15,6 +15,10 @@ REPO_DIR="/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM-depth"
 ENV_DIR="/data/neurogroup/mingyangjiang/venvs/labram-accre"
 DATA_DIR="${DATA_DIR:-/data/neurogroup/mingyangjiang/data/SEED-V_processed_lmdb}"
 SEED="${SEED:-1024}"
+EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
+REQUIRE_CLEAN_TREE="${REQUIRE_CLEAN_TREE:-1}"
+ALLOW_EXISTING_OUTPUT="${ALLOW_EXISTING_OUTPUT:-0}"
+SEEDV_CHANNEL_MANIFEST="${SEEDV_CHANNEL_MANIFEST:-}"
 RUN_ID="${RUN_ID:-seedv_labram_native_depth_s${SEED}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
 LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/$RUN_ID}"
@@ -53,6 +57,21 @@ export PYTHONNOUSERSITE=1
 source "$ENV_DIR/bin/activate"
 cd "$REPO_DIR"
 
+ACTUAL_COMMIT="$(git rev-parse HEAD)"
+if [[ -n "$EXPECTED_COMMIT" && "$ACTUAL_COMMIT" != "$EXPECTED_COMMIT" ]]; then
+  echo "ERROR: expected commit $EXPECTED_COMMIT but found $ACTUAL_COMMIT" >&2
+  exit 1
+fi
+if [[ "$REQUIRE_CLEAN_TREE" == "1" && -n "$(git status --porcelain)" ]]; then
+  echo "ERROR: repository is dirty; set REQUIRE_CLEAN_TREE=0 only for exploratory runs" >&2
+  git status --short >&2
+  exit 1
+fi
+if [[ -z "$SEEDV_CHANNEL_MANIFEST" || ! -f "$SEEDV_CHANNEL_MANIFEST" ]]; then
+  echo "ERROR: SEEDV_CHANNEL_MANIFEST must point to a validated channel manifest" >&2
+  exit 1
+fi
+
 python - <<'PY'
 import sys
 import warnings
@@ -78,7 +97,7 @@ PY
 nvidia-smi || true
 echo "NPROC_PER_NODE=$NPROC_PER_NODE BATCH_SIZE(per-gpu)=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR" >&2
 echo "RUN_ID=$RUN_ID SEED=$SEED ADAPTER=$LABRAM_ADAPTER_TYPE DEPTH_MODE=$LABRAM_ADAPTER_DEPTH_MODE DEPTH_K=$LABRAM_ADAPTER_DEPTH_K SCALE=$INPUT_SCALE_DIVISOR SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
-echo "git_commit: $(git rev-parse HEAD)" >&2
+echo "git_commit: $ACTUAL_COMMIT" >&2
 echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
 
 PYTHON_ARGS=(
@@ -94,6 +113,7 @@ PYTHON_ARGS=(
   --labram_adapter_depth_mode "$LABRAM_ADAPTER_DEPTH_MODE"
   --labram_adapter_depth_k "$LABRAM_ADAPTER_DEPTH_K"
   --input_scale_divisor "$INPUT_SCALE_DIVISOR"
+  --seedv_channel_manifest "$SEEDV_CHANNEL_MANIFEST"
   --smoothing "$SMOOTHING"
   --no_auto_resume
 )
