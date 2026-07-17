@@ -83,6 +83,10 @@ def get_args():
                         help='Multiplier on the effective LR for native_axis_adapter parameters.')
     parser.add_argument('--labram_adapter_alpha_lr_scale', default=None, type=float,
                         help='Multiplier on alpha_* LR; defaults to the adapter LR scale.')
+    parser.add_argument('--backbone_lr_scale', default=1.0, type=float,
+                        help='Multiplier on the effective LR for pretrained non-head parameters.')
+    parser.add_argument('--head_lr_scale', default=1.0, type=float,
+                        help='Multiplier on the effective LR for the classifier head.')
     parser.add_argument('--labram_adapter_fixed_alpha', default=None, type=float,
                         help='Keep every enabled adapter alpha fixed at this value and exclude it from optimization.')
     parser.add_argument('--labram_adapter_weight_decay', default=None, type=float,
@@ -569,7 +573,9 @@ def main(args, ds_init):
             adapter_lr_scale=args.labram_adapter_lr_scale,
             adapter_alpha_lr_scale=args.labram_adapter_alpha_lr_scale,
             adapter_alpha_name_prefix='native_axis_adapter.alpha_',
-            adapter_weight_decay=args.labram_adapter_weight_decay)
+            adapter_weight_decay=args.labram_adapter_weight_decay,
+            backbone_lr_scale=args.backbone_lr_scale,
+            head_lr_scale=args.head_lr_scale)
         model, optimizer, _, _ = ds_init(
             args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
         )
@@ -589,7 +595,9 @@ def main(args, ds_init):
             adapter_lr_scale=args.labram_adapter_lr_scale,
             adapter_alpha_lr_scale=args.labram_adapter_alpha_lr_scale,
             adapter_alpha_name_prefix='native_axis_adapter.alpha_',
-            adapter_weight_decay=args.labram_adapter_weight_decay)
+            adapter_weight_decay=args.labram_adapter_weight_decay,
+            backbone_lr_scale=args.backbone_lr_scale,
+            head_lr_scale=args.head_lr_scale)
         loss_scaler = NativeScaler()
 
     print("Use step level LR scheduler!")
@@ -672,6 +680,8 @@ def main(args, ds_init):
             if args.labram_adapter_alpha_lr_scale is None
             else args.labram_adapter_alpha_lr_scale
         ),
+        'backbone_lr_scale': float(args.backbone_lr_scale),
+        'head_lr_scale': float(args.head_lr_scale),
         'adapter_fixed_alpha': (
             None if args.labram_adapter_fixed_alpha is None
             else float(args.labram_adapter_fixed_alpha)

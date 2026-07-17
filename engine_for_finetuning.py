@@ -98,6 +98,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('backbone_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('head_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('adapter_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('adapter_core_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('alpha_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -243,6 +244,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         min_lr = 10.
         max_lr = 0.
         backbone_max_lr = 0.
+        head_max_lr = 0.
         adapter_max_lr = 0.
         adapter_core_max_lr = 0.
         alpha_max_lr = 0.
@@ -255,12 +257,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     alpha_max_lr = max(alpha_max_lr, group["lr"])
                 else:
                     adapter_core_max_lr = max(adapter_core_max_lr, group["lr"])
+            elif group.get("is_head", False):
+                head_max_lr = max(head_max_lr, group["lr"])
             else:
                 backbone_max_lr = max(backbone_max_lr, group["lr"])
 
         metric_logger.update(lr=max_lr)
         metric_logger.update(min_lr=min_lr)
         metric_logger.update(backbone_lr=backbone_max_lr)
+        metric_logger.update(head_lr=head_max_lr)
         metric_logger.update(adapter_lr=adapter_max_lr)
         metric_logger.update(adapter_core_lr=adapter_core_max_lr)
         metric_logger.update(alpha_lr=alpha_max_lr)
@@ -281,6 +286,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
             log_writer.update(backbone_lr=backbone_max_lr, head="opt")
+            log_writer.update(head_lr=head_max_lr, head="opt")
             log_writer.update(adapter_lr=adapter_max_lr, head="opt")
             log_writer.update(adapter_core_lr=adapter_core_max_lr, head="opt")
             log_writer.update(alpha_lr=alpha_max_lr, head="opt")

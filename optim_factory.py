@@ -57,7 +57,9 @@ class LayerDecayValueAssigner(object):
 def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=None,
                          get_layer_scale=None, adapter_name_prefix=None,
                          adapter_lr_scale=1.0, adapter_alpha_lr_scale=None,
-                         adapter_alpha_name_prefix=None, adapter_weight_decay=None, **kwargs):
+                         adapter_alpha_name_prefix=None, adapter_weight_decay=None,
+                         backbone_lr_scale=1.0, head_lr_scale=1.0,
+                         head_name_prefix='head.', **kwargs):
     if adapter_lr_scale < 0:
         raise ValueError(f"adapter_lr_scale must be non-negative, got {adapter_lr_scale!r}")
     if adapter_alpha_lr_scale is not None and adapter_alpha_lr_scale < 0:
@@ -66,6 +68,10 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
         )
     if adapter_alpha_lr_scale is None:
         adapter_alpha_lr_scale = adapter_lr_scale
+    if backbone_lr_scale < 0:
+        raise ValueError(f"backbone_lr_scale must be non-negative, got {backbone_lr_scale!r}")
+    if head_lr_scale < 0:
+        raise ValueError(f"head_lr_scale must be non-negative, got {head_lr_scale!r}")
 
     parameter_group_names = {}
     parameter_group_vars = {}
@@ -85,6 +91,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
         is_adapter_alpha = bool(
             is_adapter and adapter_alpha_name_prefix and name.startswith(adapter_alpha_name_prefix)
         )
+        is_head = bool(head_name_prefix and name.startswith(head_name_prefix))
         if param.ndim <= 1 or name.endswith(".bias") or name in skip_list: # param.ndim <= 1 len(param.shape) == 1
             group_name = "no_decay"
             this_weight_decay = 0.
@@ -103,6 +110,10 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
             group_name = "adapter_alpha_%s" % group_name
         elif is_adapter:
             group_name = "adapter_%s" % group_name
+        elif is_head:
+            group_name = "head_%s" % group_name
+        else:
+            group_name = "backbone_%s" % group_name
 
         if group_name not in parameter_group_names:
             if get_layer_scale is not None:
@@ -113,6 +124,10 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 scale *= adapter_alpha_lr_scale
             elif is_adapter:
                 scale *= adapter_lr_scale
+            elif is_head:
+                scale *= head_lr_scale
+            else:
+                scale *= backbone_lr_scale
 
             parameter_group_names[group_name] = {
                 "group_name": group_name,
@@ -121,6 +136,8 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 "lr_scale": scale,
                 "is_adapter": is_adapter,
                 "is_adapter_alpha": is_adapter_alpha,
+                "is_head": is_head,
+                "is_backbone": not is_adapter and not is_head,
                 "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
             }
             parameter_group_vars[group_name] = {
@@ -130,6 +147,8 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 "lr_scale": scale,
                 "is_adapter": is_adapter,
                 "is_adapter_alpha": is_adapter_alpha,
+                "is_head": is_head,
+                "is_backbone": not is_adapter and not is_head,
                 "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
             }
 

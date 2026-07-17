@@ -27,6 +27,8 @@ WARMUP_EPOCHS="${WARMUP_EPOCHS:-5}"
 LR="${LR:-1e-4}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.03}"
 LAYER_DECAY="${LAYER_DECAY:-0.65}"
+BACKBONE_LR_SCALE="${BACKBONE_LR_SCALE:-1.0}"
+HEAD_LR_SCALE="${HEAD_LR_SCALE:-1.0}"
 DROP_PATH="${DROP_PATH:-0.1}"
 SMOOTHING="${SMOOTHING:-0.1}"
 INPUT_SCALE_DIVISOR="${INPUT_SCALE_DIVISOR:-100.0}"
@@ -112,7 +114,7 @@ except Exception as exc:
     raise SystemExit(f"lmdb import failed before launch: {exc}")
 PY
 nvidia-smi || true
-echo "NPROC_PER_NODE=$NPROC_PER_NODE BATCH_SIZE(per-gpu)=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR" >&2
+echo "NPROC_PER_NODE=$NPROC_PER_NODE BATCH_SIZE(per-gpu)=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR BACKBONE_LR_SCALE=$BACKBONE_LR_SCALE HEAD_LR_SCALE=$HEAD_LR_SCALE" >&2
 echo "RUN_ID=$RUN_ID SEED=$SEED ADAPTER=$LABRAM_ADAPTER_TYPE VARIANT=$LABRAM_ADAPTER_VARIANT PATCH_OUTPUT_DROPOUT=$LABRAM_ADAPTER_PATCH_OUTPUT_DROPOUT DEPTH_MODE=$LABRAM_ADAPTER_DEPTH_MODE DEPTH_K=$LABRAM_ADAPTER_DEPTH_K ADAPTER_WD=${LABRAM_ADAPTER_WEIGHT_DECAY:-inherit} SCALE=$INPUT_SCALE_DIVISOR SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
 echo "git_commit: $ACTUAL_COMMIT" >&2
 echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
@@ -160,6 +162,8 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --warmup_epochs "$WARMUP_EPOCHS" \
   --epochs "$EPOCHS" \
   --layer_decay "$LAYER_DECAY" \
+  --backbone_lr_scale "$BACKBONE_LR_SCALE" \
+  --head_lr_scale "$HEAD_LR_SCALE" \
   --drop_path "$DROP_PATH" \
   --save_ckpt_freq 5 \
   --disable_rel_pos_bias \
