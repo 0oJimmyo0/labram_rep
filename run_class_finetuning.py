@@ -672,6 +672,7 @@ def main(args, ds_init):
             None if args.labram_adapter_fixed_alpha is None
             else float(args.labram_adapter_fixed_alpha)
         ),
+        'adapter_seed': int(args.labram_adapter_seed),
         'git_commit': git_commit,
         'output_dir': os.path.abspath(args.output_dir) if args.output_dir else '',
     }
