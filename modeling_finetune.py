@@ -19,6 +19,23 @@ from timm.models.registry import register_model
 from einops import rearrange
 
 
+def resize_time_embedding(time_embed: torch.Tensor, target_length: int) -> torch.Tensor:
+    """Deterministically resize [1, source_length, D] temporal embeddings."""
+    if time_embed.ndim != 3:
+        raise ValueError(f"Expected time embedding [1,S,D], got {tuple(time_embed.shape)}")
+    if target_length <= 0:
+        raise ValueError(f"target_length must be positive, got {target_length}")
+    if time_embed.shape[1] == target_length:
+        return time_embed
+    resized = F.interpolate(
+        time_embed.transpose(1, 2),
+        size=target_length,
+        mode="linear",
+        align_corners=False,
+    )
+    return resized.transpose(1, 2)
+
+
 def _cfg(url='', **kwargs):
     return {
         'url': url,
@@ -415,11 +432,16 @@ class NeuralTransformer(nn.Module):
                  adapter_seed=12345,
                  adapter_use_token_mlp=False, adapter_depth_mode="none",
                  adapter_depth_k=4, adapter_gamma_zero_skip_branch=False,
-                 adapter_fixed_alpha=None,
+                 adapter_fixed_alpha=None, isruc_sequence=False,
+                 isruc_sequence_length=20,
                  **kwargs):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.isruc_sequence = bool(isruc_sequence)
+        self.isruc_sequence_length = int(isruc_sequence_length)
+        if self.isruc_sequence and self.isruc_sequence_length <= 0:
+            raise ValueError("isruc_sequence_length must be positive")
 
         # To identify whether it is neural tokenizer or neural decoder. 
         # For the neural decoder, use linear projection (PatchEmbed) to project codebook dimension to hidden dimension.
@@ -450,6 +472,19 @@ class NeuralTransformer(nn.Module):
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+        if self.isruc_sequence:
+            self.sequence_encoder = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(
+                    d_model=embed_dim,
+                    nhead=4,
+                    dim_feedforward=4 * embed_dim,
+                    batch_first=True,
+                    activation=F.gelu,
+                    norm_first=True,
+                ),
+                num_layers=1,
+                enable_nested_tensor=False,
+            )
 
         adapter_type = str(adapter_type).strip().lower()
         if adapter_type not in {"none", "channel", "patch", "channel_patch"}:
@@ -730,7 +765,7 @@ class NeuralTransformer(nn.Module):
             x = x + pos_embed
         if self.time_embed is not None:
             nc = n if t == self.patch_size else a
-            time_embed = self.time_embed[:, 0:input_time_window, :].unsqueeze(1).expand(batch_size, nc, -1, -1).flatten(1, 2)
+            time_embed = resize_time_embedding(self.time_embed, input_time_window).unsqueeze(1).expand(batch_size, nc, -1, -1).flatten(1, 2)
             x[:, 1:, :] += time_embed
 
         x = self.pos_drop(x)
@@ -773,7 +808,7 @@ class NeuralTransformer(nn.Module):
             x = x + pos_embed
         if self.time_embed is not None:
             nc = n if t == self.patch_size else a
-            time_embed = self.time_embed[:, 0:input_time_window, :].unsqueeze(1).expand(batch_size, nc, -1, -1).flatten(1, 2)
+            time_embed = resize_time_embedding(self.time_embed, input_time_window).unsqueeze(1).expand(batch_size, nc, -1, -1).flatten(1, 2)
             x[:, 1:, :] += time_embed
 
         x = self.pos_drop(x)
@@ -829,6 +864,21 @@ class NeuralTransformer(nn.Module):
         x: [batch size, number of electrodes, number of patches, patch size]
         For example, for an EEG sample of 4 seconds with 64 electrodes, x will be [batch size, 64, 4, 200]
         '''
+        if self.isruc_sequence and x.ndim == 5:
+            batch_size, sequence_length, channels, patches, patch_size = x.shape
+            if sequence_length != self.isruc_sequence_length:
+                raise ValueError(
+                    f"ISRUC expects {self.isruc_sequence_length} epochs per sequence, "
+                    f"got {sequence_length}"
+                )
+            epoch_features = self.forward_features(
+                x.reshape(batch_size * sequence_length, channels, patches, patch_size),
+                input_chans=input_chans,
+            )
+            sequence_features = self.sequence_encoder(
+                epoch_features.reshape(batch_size, sequence_length, self.embed_dim)
+            )
+            return self.head(sequence_features)
         x = self.forward_features(x, input_chans=input_chans, return_patch_tokens=return_patch_tokens, return_all_tokens=return_all_tokens, **kwargs)
         x = self.head(x)
         return x
@@ -846,7 +896,7 @@ class NeuralTransformer(nn.Module):
             pos_embed = torch.cat((pos_embed_used[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
             x = x + pos_embed
         if self.time_embed is not None:
-            time_embed = self.time_embed[:, 0:input_time_window, :].unsqueeze(1).expand(batch_size, n, -1, -1).flatten(1, 2)
+            time_embed = resize_time_embedding(self.time_embed, input_time_window).unsqueeze(1).expand(batch_size, n, -1, -1).flatten(1, 2)
             x[:, 1:, :] += time_embed
         x = self.pos_drop(x)
 
@@ -888,7 +938,7 @@ class NeuralTransformer(nn.Module):
             pos_embed = torch.cat((pos_embed_used[:,0:1,:].expand(batch_size, -1, -1), pos_embed), dim=1)
             x = x + pos_embed
         if self.time_embed is not None:
-            time_embed = self.time_embed[:, 0:input_time_window, :].unsqueeze(1).expand(batch_size, n, -1, -1).flatten(1, 2)
+            time_embed = resize_time_embedding(self.time_embed, input_time_window).unsqueeze(1).expand(batch_size, n, -1, -1).flatten(1, 2)
             x[:, 1:, :] += time_embed
         x = self.pos_drop(x)
 

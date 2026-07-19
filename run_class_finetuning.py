@@ -226,7 +226,7 @@ def get_args():
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
     parser.add_argument('--dataset', default='TUAB', type=str,
-                        help='dataset: TUAB | TUEV | SEED-V | FACED')
+                        help='dataset: TUAB | TUEV | SEED-V | FACED | ISRUC')
     parser.add_argument('--data_path', default='',
                         help='path to the preprocessed TUAB/TUEV dataset root')
     parser.add_argument('--seedv_channel_manifest', default='',
@@ -279,6 +279,8 @@ def get_models(args):
         adapter_depth_k=args.labram_adapter_depth_k,
         adapter_gamma_zero_skip_branch=args.labram_adapter_gamma_zero_skip_branch,
         adapter_fixed_alpha=args.labram_adapter_fixed_alpha,
+        isruc_sequence=str(args.dataset).upper().replace('_', '-') == 'ISRUC',
+        isruc_sequence_length=20,
     )
 
     return model
@@ -355,8 +357,14 @@ def get_dataset(args):
             print(f"Loaded FACED channel manifest with {len(ch_names)} channels.")
         args.nb_classes = 9
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
+    elif dataset_name == 'ISRUC':
+        train_dataset, test_dataset, val_dataset = utils.prepare_ISRUC_dataset(args.data_path)
+        ch_names = list(utils.ISRUC_LABRAM_CH)
+        args.nb_classes = 5
+        args.input_size = 6000
+        metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
     else:
-        raise ValueError(f"Unsupported dataset '{args.dataset}'. Expected one of: TUAB, TUEV, SEED-V, FACED")
+        raise ValueError(f"Unsupported dataset '{args.dataset}'. Expected one of: TUAB, TUEV, SEED-V, FACED, ISRUC")
     return train_dataset, test_dataset, val_dataset, ch_names, metrics
 
 
@@ -648,6 +656,10 @@ def main(args, ds_init):
         for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
             if hasattr(dataset, 'split_metadata'):
                 split_metadata[split_name] = dataset.split_metadata()
+    if str(args.dataset).upper().replace('_', '-') == 'ISRUC':
+        for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
+            if hasattr(dataset, 'split_metadata'):
+                split_metadata[split_name] = dataset.split_metadata()
     run_config = {
         'dataset': str(args.dataset),
         'data_path': os.path.abspath(args.data_path) if args.data_path else '',
@@ -659,6 +671,7 @@ def main(args, ds_init):
         'pretrained_checkpoint': os.path.abspath(args.finetune) if args.finetune else '',
         'pretrained_checkpoint_sha256': checkpoint_sha256,
         'dataset_split_metadata': split_metadata,
+        'isruc_bipolar_channels': list(utils.ISRUC_BIPOLAR_CH) if str(args.dataset).upper().replace('_', '-') == 'ISRUC' else None,
         'requested_lr_string': args.requested_lr_string or str(args.lr),
         'parsed_args_lr': float(args.lr),
         'max_scheduled_lr': max_scheduled_lr,

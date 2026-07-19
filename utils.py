@@ -73,6 +73,90 @@ TUEV_BIPOLAR_16_CH = [
     "FP2-F4", "F4-C4", "C4-P4", "P4-O2",
 ]
 
+ISRUC_BIPOLAR_CH = ["F3-A2", "C3-A2", "O1-A2", "F4-A1", "C4-A1", "O2-A1"]
+ISRUC_LABRAM_CH = ["F3", "C3", "O1", "F4", "C4", "O2"]
+
+
+class ISRUCSequenceLoader(torch.utils.data.Dataset):
+    """Subject-wise ISRUC sequences with shape [20, 6, 30, 200]."""
+
+    def __init__(self, root, subjects):
+        self.root = Path(root)
+        self.subjects = tuple(int(subject) for subject in subjects)
+        self.samples = self._index_samples()
+        if not self.samples:
+            raise ValueError(f"ISRUC split is empty under {self.root}")
+
+    @staticmethod
+    def _numeric_files(directory):
+        files = {}
+        for path in Path(directory).glob("*.npy"):
+            stem = path.stem
+            try:
+                index = int(stem.rsplit("-", 1)[1])
+            except (IndexError, ValueError) as exc:
+                raise ValueError(f"ISRUC filename must end in a numeric sequence index: {path}") from exc
+            if index in files:
+                raise ValueError(f"Duplicate ISRUC sequence index {index} in {directory}")
+            files[index] = path
+        return files
+
+    def _index_samples(self):
+        samples = []
+        for subject in self.subjects:
+            seq_dir = self.root / "seq" / f"ISRUC-group1-{subject}"
+            label_dir = self.root / "labels" / f"ISRUC-group1-{subject}"
+            if not seq_dir.is_dir() or not label_dir.is_dir():
+                raise FileNotFoundError(f"Missing ISRUC directories for subject {subject}")
+            signals = self._numeric_files(seq_dir)
+            labels = self._numeric_files(label_dir)
+            if signals.keys() != labels.keys():
+                raise RuntimeError(f"ISRUC signal/label indices differ for subject {subject}")
+            samples.extend((subject, index, signals[index], labels[index]) for index in sorted(signals))
+        return samples
+
+    def __len__(self):
+        return len(self.samples)
+
+    def get_ch_names(self):
+        return list(ISRUC_LABRAM_CH)
+
+    def split_metadata(self):
+        return {
+            "subjects": list(self.subjects),
+            "sample_count": len(self.samples),
+            "shape": [20, 6, 30, 200],
+            "bipolar_channels": list(ISRUC_BIPOLAR_CH),
+            "labram_channel_names": list(ISRUC_LABRAM_CH),
+        }
+
+    def __getitem__(self, index):
+        subject, sequence_index, signal_path, label_path = self.samples[index]
+        signal = np.load(signal_path)
+        label = np.load(label_path)
+        if tuple(signal.shape) == (20, 6, 6000):
+            signal = signal.reshape(20, 6, 30, 200)
+        if tuple(signal.shape) != (20, 6, 30, 200):
+            raise ValueError(f"ISRUC subject={subject} index={sequence_index} signal shape={signal.shape}")
+        if tuple(label.shape) != (20,):
+            raise ValueError(f"ISRUC subject={subject} index={sequence_index} label shape={label.shape}")
+        if not np.isfinite(signal).all():
+            raise ValueError(f"ISRUC subject={subject} index={sequence_index} has non-finite signal values")
+        if not np.isin(label, [0, 1, 2, 3, 4]).all():
+            raise ValueError(f"ISRUC subject={subject} index={sequence_index} has unexpected labels")
+        return torch.FloatTensor(signal), torch.LongTensor(label)
+
+
+def prepare_ISRUC_dataset(root):
+    train_dataset = ISRUCSequenceLoader(root, range(1, 81))
+    val_dataset = ISRUCSequenceLoader(root, range(81, 91))
+    test_dataset = ISRUCSequenceLoader(root, range(91, 101))
+    print(
+        f"[ISRUC] train={len(train_dataset)} val={len(val_dataset)} test={len(test_dataset)} "
+        f"shape={[20, 6, 30, 200]} channels={ISRUC_BIPOLAR_CH}"
+    )
+    return train_dataset, test_dataset, val_dataset
+
 
 def bool_flag(s):
     """

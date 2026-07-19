@@ -16,6 +16,10 @@ import utils
 from einops import rearrange
 
 def ensure_patch_tensor(samples, patch_size=200):
+    if samples.ndim == 5:
+        if samples.shape[-1] != patch_size or samples.shape[-2] <= 0:
+            raise ValueError(f"Expected sequence EEG [B,L,C,S,{patch_size}], got shape={tuple(samples.shape)}")
+        return samples
     if samples.ndim == 4:
         return samples
     if samples.ndim == 3:
@@ -29,7 +33,10 @@ def ensure_patch_tensor(samples, patch_size=200):
 
 def train_class_batch(model, samples, target, criterion, ch_names):
     outputs = model(samples, ch_names)
-    loss = criterion(outputs, target)
+    if outputs.ndim == 3 and target.ndim == 2:
+        loss = criterion(outputs.reshape(-1, outputs.shape[-1]), target.reshape(-1))
+    else:
+        loss = criterion(outputs, target)
     return loss, outputs
 
 
@@ -133,7 +140,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         samples = samples.float().to(device, non_blocking=True) / input_scale_divisor
         samples = ensure_patch_tensor(samples, patch_size=200)
-        input_time_window = samples.shape[2] if samples.shape[-1] == 200 else samples.shape[-1]
+        input_time_window = samples.shape[3] if samples.ndim == 5 else (samples.shape[2] if samples.shape[-1] == 200 else samples.shape[-1])
         
         targets = targets.to(device, non_blocking=True)
         if is_binary:
@@ -333,15 +340,18 @@ def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=
         # compute output
         with torch.amp.autocast("cuda", enabled=device.type == "cuda"):
             output = model(EEG, input_chans=input_chans)
-            loss = criterion(output, target)
+            if output.ndim == 3 and target.ndim == 2:
+                loss = criterion(output.reshape(-1, output.shape[-1]), target.reshape(-1))
+            else:
+                loss = criterion(output, target)
         
         if is_binary:
             output = torch.sigmoid(output).cpu()
         else:
             output = output.cpu()
         target = target.cpu()
-        pred.append(output)
-        true.append(target)
+        pred.append(output.reshape(-1, output.shape[-1]) if output.ndim == 3 else output)
+        true.append(target.reshape(-1) if target.ndim == 2 else target)
 
         batch_size = EEG.shape[0]
         metric_logger.update(loss=loss.item())
