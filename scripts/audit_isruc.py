@@ -28,7 +28,7 @@ def numeric_files(directory: Path):
     return result
 
 
-def inspect_processed(root: Path, edf_root: Path):
+def inspect_processed(root: Path, edf_root: Path | None):
     seq_root = root / "seq"
     label_root = root / "labels"
     if not seq_root.is_dir() or not label_root.is_dir():
@@ -69,28 +69,34 @@ def inspect_processed(root: Path, edf_root: Path):
             if not values.issubset(EXPECTED_LABELS):
                 raise AssertionError(f"Unexpected remapped labels in {labels[index]}: {values}")
             saved_labels.extend(np.asarray(label).reshape(-1).tolist())
-        annotation_path = edf_root / str(subject) / f"{subject}_1.txt"
-        if not annotation_path.is_file():
-            raise AssertionError(f"Missing first-expert annotation file: {annotation_path}")
-        raw_lines = [line.strip() for line in annotation_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        invalid_raw = sorted(set(raw_lines) - set(RAW_TO_LABEL))
-        if invalid_raw:
-            raise AssertionError(f"Unexpected raw labels in {annotation_path}: {invalid_raw}")
-        raw_label_count = len(raw_lines)
         saved_label_count = len(signals) * 20
-        if raw_label_count < saved_label_count or raw_label_count - saved_label_count >= 20:
-            raise AssertionError(
-                f"Subject {subject} label truncation is invalid: raw={raw_label_count}, saved={saved_label_count}"
-            )
-        expected_labels = [RAW_TO_LABEL[value] for value in raw_lines[:saved_label_count]]
-        if saved_labels != expected_labels:
-            raise AssertionError(f"Serialized labels do not match {annotation_path} after raw mapping/truncation")
-        discarded[subject] = raw_label_count - saved_label_count
+        if edf_root is not None:
+            annotation_path = edf_root / str(subject) / f"{subject}_1.txt"
+            if not annotation_path.is_file():
+                raise AssertionError(f"Missing first-expert annotation file: {annotation_path}")
+            raw_lines = [line.strip() for line in annotation_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            invalid_raw = sorted(set(raw_lines) - set(RAW_TO_LABEL))
+            if invalid_raw:
+                raise AssertionError(f"Unexpected raw labels in {annotation_path}: {invalid_raw}")
+            raw_label_count = len(raw_lines)
+            if raw_label_count < saved_label_count or raw_label_count - saved_label_count >= 20:
+                raise AssertionError(
+                    f"Subject {subject} label truncation is invalid: raw={raw_label_count}, saved={saved_label_count}"
+                )
+            expected_labels = [RAW_TO_LABEL[value] for value in raw_lines[:saved_label_count]]
+            if saved_labels != expected_labels:
+                raise AssertionError(f"Serialized labels do not match {annotation_path} after raw mapping/truncation")
+            discarded[subject] = raw_label_count - saved_label_count
 
     for left, right in (("train", "val"), ("train", "test"), ("val", "test")):
         if split_sets[left] & split_sets[right]:
             raise AssertionError(f"Subject overlap between {left} and {right}")
-    return {"subjects": subjects, "sequence_counts": total, "discarded_epochs": discarded}
+    return {
+        "subjects": subjects,
+        "sequence_counts": total,
+        "discarded_epochs": discarded,
+        "raw_label_and_discard_audit": "passed" if edf_root is not None else "unavailable",
+    }
 
 
 def inspect_edf_channels(edf_root: Path):
@@ -119,17 +125,28 @@ def inspect_edf_channels(edf_root: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", required=True, type=Path)
-    parser.add_argument("--edf-root", required=True, type=Path)
+    parser.add_argument(
+        "--edf-root",
+        type=Path,
+        default=None,
+        help="Raw ISRUC group1 root. Omit only for an explicitly serialized-only audit.",
+    )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
     report = inspect_processed(args.data_root, args.edf_root)
-    report["bipolar_channels"] = inspect_edf_channels(args.edf_root)
+    if args.edf_root is None:
+        report["raw_edf_audit"] = "unavailable"
+        report["bipolar_channels"] = None
+    else:
+        report["bipolar_channels"] = inspect_edf_channels(args.edf_root)
+        report["raw_edf_audit"] = "passed"
     report["expected_bipolar_channels"] = EXPECTED_BIPOLAR
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
-    print("ISRUC audit: PASS")
+    suffix = " (serialized-only; raw EDF audit unavailable)" if args.edf_root is None else ""
+    print(f"ISRUC audit: PASS{suffix}")
 
 
 if __name__ == "__main__":

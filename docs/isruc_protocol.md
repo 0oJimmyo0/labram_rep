@@ -34,6 +34,23 @@ not a claim that the mastoid reference is represented by LaBraM's token geometry
 - The loader returns stored values without scaling; the training/evaluation engine
   applies the single configured `input_scale_divisor`.
 
+The serialized data follows `EEGxPlore/preprocessing/ISRUC/prepare_ISRUC_1.py`:
+
+- MNE filtering: 0.3--35 Hz FIR, followed by a 50 Hz notch filter.
+- No resampling is performed by the script; the source recording is expected at
+  200 Hz.
+- `raw.to_data_frame().values[:, 1:]` removes the timestamp column, then
+  `[:, 2:8]` selects the six stored signal columns.
+- Incomplete 30-second epochs are dropped, then incomplete 20-epoch sequences
+  are dropped independently for each subject.
+- Labels come from the first expert file and use the mapping `{0: 0, 1: 1,
+  2: 2, 3: 3, 5: 4}`.
+
+This script is useful provenance when raw EDF files are unavailable, but it does
+not independently prove the source channel names or annotation contents. The
+auditor therefore supports a serialized-only report, while a full audit with
+`--edf-root` remains the stronger gate for paper-facing results.
+
 ## Model comparison
 
 All variants share the same sequence encoder, classifier, initialization, optimizer,
@@ -59,4 +76,3 @@ modulation of the structured residual and does not replace the final LaBraM grid
 Run `scripts/audit_isruc.py` before model training. It must verify subject splits,
 numeric signal/label pairing, shapes, labels, finite values, channel metadata when
 the raw EDF root is supplied, and discarded-epoch accounting.
-
