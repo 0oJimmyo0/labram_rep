@@ -433,7 +433,7 @@ class NeuralTransformer(nn.Module):
                  adapter_use_token_mlp=False, adapter_depth_mode="none",
                  adapter_depth_k=4, adapter_gamma_zero_skip_branch=False,
                  adapter_fixed_alpha=None, isruc_sequence=False,
-                 isruc_sequence_length=20,
+                 isruc_sequence_length=20, isruc_sequence_dropout=0.1,
                  **kwargs):
         super().__init__()
         self.num_classes = num_classes
@@ -478,6 +478,7 @@ class NeuralTransformer(nn.Module):
                     d_model=embed_dim,
                     nhead=4,
                     dim_feedforward=4 * embed_dim,
+                    dropout=float(isruc_sequence_dropout),
                     batch_first=True,
                     activation=F.gelu,
                     norm_first=True,

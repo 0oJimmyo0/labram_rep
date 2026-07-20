@@ -112,6 +112,8 @@ def get_args():
                         help='Attention dropout rate (default: 0.)')
     parser.add_argument('--drop_path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
+    parser.add_argument('--isruc_sequence_dropout', type=float, default=0.1,
+                        help='Dropout in the ISRUC sequence-context Transformer (default: 0.1).')
 
     parser.add_argument('--disable_eval_during_finetuning', action='store_true', default=False)
     parser.add_argument('--skip_final_test', action='store_true', default=False,
@@ -281,6 +283,7 @@ def get_models(args):
         adapter_fixed_alpha=args.labram_adapter_fixed_alpha,
         isruc_sequence=str(args.dataset).upper().replace('_', '-') == 'ISRUC',
         isruc_sequence_length=20,
+        isruc_sequence_dropout=args.isruc_sequence_dropout,
     )
 
     return model
@@ -677,6 +680,17 @@ def main(args, ds_init):
         'max_scheduled_lr': max_scheduled_lr,
         'warmup_epochs': int(args.warmup_epochs),
         'seed': int(args.seed),
+        'smoothing': float(args.smoothing),
+        'drop_path': float(args.drop_path),
+        'drop': float(args.drop),
+        'attn_drop_rate': float(args.attn_drop_rate),
+        'weight_decay': float(args.weight_decay),
+        'weight_decay_end': float(args.weight_decay_end),
+        'model_ema': bool(args.model_ema),
+        'sequence_head_dropout': (
+            float(args.isruc_sequence_dropout)
+            if str(args.dataset).upper().replace('_', '-') == 'ISRUC' else None
+        ),
         'adapter_type': args.labram_adapter_type,
         'adapter_variant': args.labram_adapter_variant,
         'adapter_patch_output_dropout': float(args.labram_adapter_patch_output_dropout),
@@ -692,6 +706,10 @@ def main(args, ds_init):
             args.labram_adapter_lr_scale
             if args.labram_adapter_alpha_lr_scale is None
             else args.labram_adapter_alpha_lr_scale
+        ),
+        'adapter_weight_decay': (
+            None if args.labram_adapter_weight_decay is None
+            else float(args.labram_adapter_weight_decay)
         ),
         'backbone_lr_scale': float(args.backbone_lr_scale),
         'head_lr_scale': float(args.head_lr_scale),

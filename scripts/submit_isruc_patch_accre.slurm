@@ -21,7 +21,10 @@ EPOCHS="${EPOCHS:-30}"
 LR="${LR:-2e-4}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.05}"
 LAYER_DECAY="${LAYER_DECAY:-0.65}"
-RUN_ID="${RUN_ID:-isruc_labram_patch_lr${LR}_s${SEED}_b${BATCH_SIZE}_e${EPOCHS}_scale1}"
+ADAPTER_LR_SCALE="${ADAPTER_LR_SCALE:-0.1}"
+ADAPTER_ALPHA_LR_SCALE="${ADAPTER_ALPHA_LR_SCALE:-$ADAPTER_LR_SCALE}"
+SEQUENCE_DROPOUT="${SEQUENCE_DROPOUT:-0.1}"
+RUN_ID="${RUN_ID:-isruc_labram_patch_lr${LR}_s${SEED}_b${BATCH_SIZE}_e${EPOCHS}_als${ADAPTER_LR_SCALE}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
 LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/$RUN_ID}"
 
@@ -49,7 +52,7 @@ if not torch.cuda.is_available():
 PY
 nvidia-smi
 
-echo "ISRUC patch-only launch: seed=$SEED batch=$BATCH_SIZE workers=$NUM_WORKERS epochs=$EPOCHS lr=$LR scale=1 adapter=patch depth=none alpha=0.01 adapter_lr_scale=0.1 alpha_lr_scale=0.1" >&2
+echo "ISRUC patch-only launch: seed=$SEED batch=$BATCH_SIZE workers=$NUM_WORKERS epochs=$EPOCHS lr=$LR scale=1 adapter=patch depth=none alpha=0.01 adapter_lr_scale=$ADAPTER_LR_SCALE alpha_lr_scale=$ADAPTER_ALPHA_LR_SCALE sequence_dropout=$SEQUENCE_DROPOUT" >&2
 echo "git_commit: $(git rev-parse HEAD)" >&2
 echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
 echo "signal_stats: $(sha256sum ./signal_stats_train.json | awk '{print $1}')" >&2
@@ -71,6 +74,7 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node=1 run_class_
   --update_freq 1 \
   --warmup_epochs 1 \
   --epochs "$EPOCHS" \
+  --isruc_sequence_dropout "$SEQUENCE_DROPOUT" \
   --labram_adapter_type patch \
   --labram_adapter_variant full \
   --labram_adapter_bottleneck 64 \
@@ -79,8 +83,8 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node=1 run_class_
   --labram_adapter_patch_output_dropout 0.0 \
   --labram_adapter_init_alpha 0.01 \
   --labram_adapter_gamma 1.0 \
-  --labram_adapter_lr_scale 0.1 \
-  --labram_adapter_alpha_lr_scale 0.1 \
+  --labram_adapter_lr_scale "$ADAPTER_LR_SCALE" \
+  --labram_adapter_alpha_lr_scale "$ADAPTER_ALPHA_LR_SCALE" \
   --labram_adapter_seed 12345 \
   --labram_adapter_depth_mode none \
   --disable_rel_pos_bias \
