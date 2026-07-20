@@ -33,6 +33,9 @@ not a claim that the mastoid reference is represented by LaBraM's token geometry
   grouped. Do not filter them again.
 - The loader returns stored values without scaling; the training/evaluation engine
   applies the single configured `input_scale_divisor`.
+- A train-only magnitude audit is archived in `signal_stats_train.json`. Its
+  microvolt-scale distribution freezes `input_scale_divisor=1.0` for ISRUC
+  engineering runs; do not apply CBraMod's downstream `/100` transformation.
 
 The serialized data follows `EEGxPlore/preprocessing/ISRUC/prepare_ISRUC_1.py`:
 
