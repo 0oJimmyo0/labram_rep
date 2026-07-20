@@ -21,7 +21,10 @@ EPOCHS="${EPOCHS:-3}"
 LR="${LR:-1e-4}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.05}"
 LAYER_DECAY="${LAYER_DECAY:-0.65}"
-RUN_ID="${RUN_ID:-isruc_labram_dense_dev_s${SEED}_e${EPOCHS}_scale1}"
+BACKBONE_LR_SCALE="${BACKBONE_LR_SCALE:-1.0}"
+HEAD_LR_SCALE="${HEAD_LR_SCALE:-1.0}"
+SEQUENCE_DROPOUT="${SEQUENCE_DROPOUT:-0.1}"
+RUN_ID="${RUN_ID:-isruc_labram_dense_lr${LR}_s${SEED}_b${BATCH_SIZE}_e${EPOCHS}_bls${BACKBONE_LR_SCALE}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
 LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/$RUN_ID}"
 
@@ -49,7 +52,7 @@ if not torch.cuda.is_available():
 PY
 nvidia-smi
 
-echo "ISRUC dense development launch: seed=$SEED batch=$BATCH_SIZE workers=$NUM_WORKERS epochs=$EPOCHS lr=$LR scale=1 adapter=none depth=none" >&2
+echo "ISRUC dense launch: seed=$SEED batch=$BATCH_SIZE workers=$NUM_WORKERS epochs=$EPOCHS lr=$LR scale=1 adapter=none depth=none backbone_lr_scale=$BACKBONE_LR_SCALE head_lr_scale=$HEAD_LR_SCALE sequence_dropout=$SEQUENCE_DROPOUT" >&2
 echo "git_commit: $(git rev-parse HEAD)" >&2
 echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
 echo "signal_stats: $(sha256sum ./signal_stats_train.json | awk '{print $1}')" >&2
@@ -68,9 +71,12 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node=1 run_class_
   --requested_lr_string "$LR" \
   --weight_decay "$WEIGHT_DECAY" \
   --layer_decay "$LAYER_DECAY" \
+  --backbone_lr_scale "$BACKBONE_LR_SCALE" \
+  --head_lr_scale "$HEAD_LR_SCALE" \
   --update_freq 1 \
   --warmup_epochs 1 \
   --epochs "$EPOCHS" \
+  --isruc_sequence_dropout "$SEQUENCE_DROPOUT" \
   --labram_adapter_type none \
   --labram_adapter_depth_mode none \
   --disable_rel_pos_bias \

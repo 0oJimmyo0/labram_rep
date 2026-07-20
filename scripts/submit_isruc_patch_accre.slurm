@@ -24,7 +24,9 @@ LAYER_DECAY="${LAYER_DECAY:-0.65}"
 ADAPTER_LR_SCALE="${ADAPTER_LR_SCALE:-0.1}"
 ADAPTER_ALPHA_LR_SCALE="${ADAPTER_ALPHA_LR_SCALE:-$ADAPTER_LR_SCALE}"
 SEQUENCE_DROPOUT="${SEQUENCE_DROPOUT:-0.1}"
-RUN_ID="${RUN_ID:-isruc_labram_patch_lr${LR}_s${SEED}_b${BATCH_SIZE}_e${EPOCHS}_als${ADAPTER_LR_SCALE}}"
+BACKBONE_LR_SCALE="${BACKBONE_LR_SCALE:-1.0}"
+HEAD_LR_SCALE="${HEAD_LR_SCALE:-1.0}"
+RUN_ID="${RUN_ID:-isruc_labram_patch_lr${LR}_s${SEED}_b${BATCH_SIZE}_e${EPOCHS}_als${ADAPTER_LR_SCALE}_bls${BACKBONE_LR_SCALE}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
 LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/$RUN_ID}"
 
@@ -52,7 +54,7 @@ if not torch.cuda.is_available():
 PY
 nvidia-smi
 
-echo "ISRUC patch-only launch: seed=$SEED batch=$BATCH_SIZE workers=$NUM_WORKERS epochs=$EPOCHS lr=$LR scale=1 adapter=patch depth=none alpha=0.01 adapter_lr_scale=$ADAPTER_LR_SCALE alpha_lr_scale=$ADAPTER_ALPHA_LR_SCALE sequence_dropout=$SEQUENCE_DROPOUT" >&2
+echo "ISRUC patch-only launch: seed=$SEED batch=$BATCH_SIZE workers=$NUM_WORKERS epochs=$EPOCHS lr=$LR scale=1 adapter=patch depth=none alpha=0.01 adapter_lr_scale=$ADAPTER_LR_SCALE alpha_lr_scale=$ADAPTER_ALPHA_LR_SCALE backbone_lr_scale=$BACKBONE_LR_SCALE head_lr_scale=$HEAD_LR_SCALE sequence_dropout=$SEQUENCE_DROPOUT" >&2
 echo "git_commit: $(git rev-parse HEAD)" >&2
 echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
 echo "signal_stats: $(sha256sum ./signal_stats_train.json | awk '{print $1}')" >&2
@@ -71,6 +73,8 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node=1 run_class_
   --requested_lr_string "$LR" \
   --weight_decay "$WEIGHT_DECAY" \
   --layer_decay "$LAYER_DECAY" \
+  --backbone_lr_scale "$BACKBONE_LR_SCALE" \
+  --head_lr_scale "$HEAD_LR_SCALE" \
   --update_freq 1 \
   --warmup_epochs 1 \
   --epochs "$EPOCHS" \
