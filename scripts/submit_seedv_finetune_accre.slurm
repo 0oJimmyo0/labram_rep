@@ -29,6 +29,7 @@ WEIGHT_DECAY="${WEIGHT_DECAY:-0.03}"
 LAYER_DECAY="${LAYER_DECAY:-0.65}"
 BACKBONE_LR_SCALE="${BACKBONE_LR_SCALE:-1.0}"
 HEAD_LR_SCALE="${HEAD_LR_SCALE:-1.0}"
+LABRAM_BACKBONE_MODE="${LABRAM_BACKBONE_MODE:-trainable}"
 DROP_PATH="${DROP_PATH:-0.1}"
 SMOOTHING="${SMOOTHING:-0.1}"
 INPUT_SCALE_DIVISOR="${INPUT_SCALE_DIVISOR:-100.0}"
@@ -48,7 +49,7 @@ LABRAM_ADAPTER_DEPTH_MODE="${LABRAM_ADAPTER_DEPTH_MODE:-none}"
 LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-2}"
 SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-1}"
 DETERMINISTIC="${DETERMINISTIC:-0}"
-RUN_ID="${RUN_ID:-seedv_labram_${LABRAM_ADAPTER_TYPE}_s${SEED}_b${BATCH_SIZE}_lr${LR}_e${EPOCHS}}"
+RUN_ID="${RUN_ID:-seedv_labram_${LABRAM_ADAPTER_TYPE}_${LABRAM_BACKBONE_MODE}_s${SEED}_b${BATCH_SIZE}_lr${LR}_e${EPOCHS}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
 LOG_DIR="${LOG_DIR:-$REPO_DIR/logs/tensorboard/$RUN_ID}"
 
@@ -59,6 +60,27 @@ case "$SEED" in
     exit 1
     ;;
 esac
+
+case "$LABRAM_BACKBONE_MODE" in
+  trainable|frozen) ;;
+  *)
+    echo "ERROR: LABRAM_BACKBONE_MODE must be trainable or frozen" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$LABRAM_BACKBONE_MODE" == "frozen" ]]; then
+  if [[ "$LABRAM_ADAPTER_DEPTH_MODE" != "none" ]]; then
+    echo "ERROR: Initial frozen SEED-V block requires depth_mode=none" >&2
+    exit 1
+  fi
+  if [[ "$LABRAM_ADAPTER_TYPE" != "none" ]]; then
+    if [[ "$LABRAM_ADAPTER_LR_SCALE" != "1.0" || "$LABRAM_ADAPTER_ALPHA_LR_SCALE" != "1.0" ]]; then
+      echo "ERROR: Frozen adapter runs require core and alpha LR scales of 1.0" >&2
+      exit 1
+    fi
+  fi
+fi
 
 mkdir -p "$REPO_DIR/logs/out" "$REPO_DIR/logs/err" "$LOG_DIR"
 
@@ -114,7 +136,7 @@ except Exception as exc:
     raise SystemExit(f"lmdb import failed before launch: {exc}")
 PY
 nvidia-smi || true
-echo "NPROC_PER_NODE=$NPROC_PER_NODE BATCH_SIZE(per-gpu)=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR BACKBONE_LR_SCALE=$BACKBONE_LR_SCALE HEAD_LR_SCALE=$HEAD_LR_SCALE" >&2
+echo "NPROC_PER_NODE=$NPROC_PER_NODE BATCH_SIZE(per-gpu)=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR BACKBONE_LR_SCALE=$BACKBONE_LR_SCALE HEAD_LR_SCALE=$HEAD_LR_SCALE BACKBONE_MODE=$LABRAM_BACKBONE_MODE" >&2
 echo "RUN_ID=$RUN_ID SEED=$SEED ADAPTER=$LABRAM_ADAPTER_TYPE VARIANT=$LABRAM_ADAPTER_VARIANT PATCH_OUTPUT_DROPOUT=$LABRAM_ADAPTER_PATCH_OUTPUT_DROPOUT DEPTH_MODE=$LABRAM_ADAPTER_DEPTH_MODE DEPTH_K=$LABRAM_ADAPTER_DEPTH_K ADAPTER_WD=${LABRAM_ADAPTER_WEIGHT_DECAY:-inherit} SCALE=$INPUT_SCALE_DIVISOR SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
 echo "git_commit: $ACTUAL_COMMIT" >&2
 echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
@@ -133,6 +155,7 @@ PYTHON_ARGS=(
   --labram_adapter_seed "$LABRAM_ADAPTER_SEED"
   --labram_adapter_depth_mode "$LABRAM_ADAPTER_DEPTH_MODE"
   --labram_adapter_depth_k "$LABRAM_ADAPTER_DEPTH_K"
+  --labram_backbone_mode "$LABRAM_BACKBONE_MODE"
   --input_scale_divisor "$INPUT_SCALE_DIVISOR"
   --seedv_channel_manifest "$SEEDV_CHANNEL_MANIFEST"
   --smoothing "$SMOOTHING"

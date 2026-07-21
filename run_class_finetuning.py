@@ -36,6 +36,55 @@ import utils
 from scipy import interpolate
 import modeling_finetune
 
+
+def configure_labram_trainability(model, backbone_mode):
+    """Configure and summarize LaBraM backbone/head/adapter trainability."""
+    if backbone_mode not in {"trainable", "frozen"}:
+        raise ValueError(f"Unsupported backbone_mode={backbone_mode!r}")
+
+    summary = {
+        "backbone": {"total": 0, "trainable": 0},
+        "head": {"total": 0, "trainable": 0},
+        "adapter": {"total": 0, "trainable": 0},
+    }
+    for name, parameter in model.named_parameters():
+        if name.startswith("native_axis_adapter."):
+            component = "adapter"
+        elif name.startswith("head."):
+            component = "head"
+        else:
+            component = "backbone"
+        should_train = backbone_mode == "trainable" or component in {"head", "adapter"}
+        parameter.requires_grad_(should_train)
+        summary[component]["total"] += parameter.numel()
+        if parameter.requires_grad:
+            summary[component]["trainable"] += parameter.numel()
+
+    if backbone_mode == "frozen":
+        if summary["backbone"]["trainable"] != 0:
+            raise RuntimeError("Frozen-backbone mode left trainable backbone parameters.")
+        if summary["head"]["trainable"] == 0:
+            raise RuntimeError("Frozen-backbone mode accidentally froze the classifier head.")
+    return summary
+
+
+def assert_optimizer_matches_trainability(model, optimizer):
+    """Ensure optimizer membership exactly matches requires_grad flags."""
+    optimizer_parameter_ids = {
+        id(parameter)
+        for group in optimizer.param_groups
+        for parameter in group["params"]
+    }
+    errors = []
+    for name, parameter in model.named_parameters():
+        in_optimizer = id(parameter) in optimizer_parameter_ids
+        if parameter.requires_grad and not in_optimizer:
+            errors.append(f"Trainable parameter missing from optimizer: {name}")
+        if not parameter.requires_grad and in_optimizer:
+            errors.append(f"Frozen parameter present in optimizer: {name}")
+    if errors:
+        raise RuntimeError("\n".join(errors))
+
 def get_args():
     parser = argparse.ArgumentParser('LaBraM fine-tuning and evaluation script for EEG classification', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -87,6 +136,9 @@ def get_args():
                         help='Multiplier on the effective LR for pretrained non-head parameters.')
     parser.add_argument('--head_lr_scale', default=1.0, type=float,
                         help='Multiplier on the effective LR for the classifier head.')
+    parser.add_argument('--labram_backbone_mode', default='trainable',
+                        choices=['trainable', 'frozen'],
+                        help='Optimize the pretrained backbone or train only the head and enabled adapter.')
     parser.add_argument('--labram_adapter_fixed_alpha', default=None, type=float,
                         help='Keep every enabled adapter alpha fixed at this value and exclude it from optimization.')
     parser.add_argument('--labram_adapter_weight_decay', default=None, type=float,
@@ -341,6 +393,15 @@ def get_dataset(args):
                 "SEED-V LaBraM runs require a validated channel manifest matching the stored tensor. "
                 "Provide --seedv_channel_manifest or place channel_names.json beside the LMDB."
             )
+        if len(ch_names) != 62:
+            raise RuntimeError(
+                f"The retained SEED-V protocol expects exactly 62 channels, found {len(ch_names)}."
+            )
+        input_chans = utils.get_input_chans(ch_names)
+        if input_chans[0] != 0 or len(input_chans[1:]) != 62:
+            raise RuntimeError("SEED-V channel mapping must contain CLS slot 0 plus 62 electrodes.")
+        if len(set(input_chans[1:])) != 62:
+            raise RuntimeError("SEED-V channel mapping contains duplicate LaBraM positions.")
         else:
             print(f"Loaded SEED-V channel manifest with {len(ch_names)} channels.")
         args.nb_classes = 5
@@ -524,6 +585,25 @@ def main(args, ds_init):
 
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
 
+    trainability_summary = configure_labram_trainability(
+        model,
+        backbone_mode=args.labram_backbone_mode,
+    )
+    print(
+        "Trainability summary: "
+        + json.dumps(trainability_summary, indent=2, sort_keys=True),
+        flush=True,
+    )
+    dataset_key = str(args.dataset).upper().replace('_', '-')
+    if dataset_key in {'SEED-V', 'SEEDV'} and args.labram_backbone_mode == 'frozen':
+        adapter_trainable = trainability_summary['adapter']['trainable']
+        assert trainability_summary['backbone']['trainable'] == 0
+        assert trainability_summary['head']['trainable'] > 0
+        if args.labram_adapter_type == 'none':
+            assert adapter_trainable == 0
+        else:
+            assert adapter_trainable > 0
+
     model.to(device)
 
     model_ema = None
@@ -611,6 +691,9 @@ def main(args, ds_init):
             head_lr_scale=args.head_lr_scale)
         loss_scaler = NativeScaler()
 
+    if not args.enable_deepspeed:
+        assert_optimizer_matches_trainability(model_without_ddp, optimizer)
+
     print("Use step level LR scheduler!")
     lr_schedule_values = utils.cosine_scheduler(
         args.lr, args.min_lr, args.epochs, num_training_steps_per_epoch,
@@ -680,6 +763,20 @@ def main(args, ds_init):
         'max_scheduled_lr': max_scheduled_lr,
         'warmup_epochs': int(args.warmup_epochs),
         'seed': int(args.seed),
+        'backbone_mode': args.labram_backbone_mode,
+        'frozen_backbone_eval_mode': False,
+        'trainability_summary': trainability_summary,
+        'total_parameter_count': int(sum(p.numel() for p in model_without_ddp.parameters())),
+        'trainable_parameter_count': int(sum(
+            p.numel() for p in model_without_ddp.parameters() if p.requires_grad
+        )),
+        'trainable_parameter_fraction': float(
+            sum(p.numel() for p in model_without_ddp.parameters() if p.requires_grad)
+            / max(1, sum(p.numel() for p in model_without_ddp.parameters()))
+        ),
+        'trainable_backbone_parameters': int(trainability_summary['backbone']['trainable']),
+        'trainable_head_parameters': int(trainability_summary['head']['trainable']),
+        'trainable_adapter_parameters': int(trainability_summary['adapter']['trainable']),
         'smoothing': float(args.smoothing),
         'drop_path': float(args.drop_path),
         'drop': float(args.drop),

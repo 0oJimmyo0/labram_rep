@@ -373,6 +373,10 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             "adapter_channel_count": channels,
             "adapter_patch_count": patches,
             "adapter_embed_dim": dim,
+            "channel_attention_sequence_length": channels if hasattr(self, "channel_attn") else None,
+            "channel_spatial_interactions_active": int(
+                hasattr(self, "channel_attn") and channels > 1
+            ),
             "patch_attention_sequence_length": patches,
             "patch_temporal_interactions_active": int(patches > 1),
         }
