@@ -1,6 +1,6 @@
 # LaBraM Adapter Progress Memory
 
-Last updated: 2026-07-13
+Last updated: 2026-07-20
 
 ## Repository State
 
@@ -673,3 +673,76 @@ is dense versus channel-only at global LR `1e-4` and `5e-4`, all on seed `3407`,
 with batch size `32`, warmup `5`, 40 epochs, core LR scale `1.0`, alpha LR
 scale `0.1`, alpha init `0.01`, depth off, token MLP off, and test disabled.
 Any candidate must later be confirmed on the fixed packet `{42, 1024, 3407}`.
+
+## ISRUC frozen-backbone confirmation and SEED-V transition (2026-07-20)
+
+The ISRUC frozen dense-versus-patch packet is complete on seeds `{42, 1024,
+3407}`. All runs use the same checkpoint, ISRUC preprocessing/splits, batch
+size `16`, global LR `2e-4`, 30 epochs, sequence-head dropout `0.1`, smoothing
+`0.1`, drop path `0.1`, weight decay `0.05`, and validation-kappa selection.
+The frozen condition uses `backbone_lr_scale=0`, `head_lr_scale=1`, patch
+adapter core and alpha LR scales `1`, depth off, and token MLP off.
+
+| Seed | Dense frozen kappa | Patch frozen kappa | Delta kappa | Delta BA | Delta weighted F1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 42 | 0.58527 | 0.69980 | +0.11452 | +0.14143 | +0.10898 |
+| 1024 | 0.57693 | 0.70673 | +0.12979 | +0.15793 | +0.12075 |
+| 3407 | 0.57950 | 0.70229 | +0.12279 | +0.15018 | +0.11651 |
+| Mean | 0.58057 | 0.70294 | **+0.12237** | **+0.14985** | **+0.11542** |
+
+Patch wins all three seeds. Frozen patch selected epochs are `19`, `23`, and
+`19`; peak-to-final kappa declines are `0.00315`, `0.00407`, and `0.00525`,
+compared with approximately `0.021` for the original fully fine-tuned patch
+trajectory. Backbone freezing therefore largely resolves the early
+generalization collapse. The adapter remains strongly active: selected-
+checkpoint `alpha_patch` is about `0.118-0.122`, residual ratio about
+`0.366-0.370`, and raw patch ratio about `3.0-3.1`.
+
+This is a reproducible parameter-efficient adaptation result, but not yet a
+full-finetuning replacement. The earlier fully fine-tuned dense mean across
+the same seeds is approximately `0.765` kappa, `0.795` BA, and `0.819` weighted
+F1; frozen patch averages `0.703`, `0.725`, and `0.769`. The correct claim is
+conditional: patch residual adaptation is strongly useful when the pretrained
+backbone is frozen, while full fine-tuning still gives higher absolute
+performance.
+
+The frozen ISRUC run directories are:
+
+```text
+seed 42:   checkpoints/isruc_dense_bls0_lr2e-4_s42_b16_e30
+           checkpoints/isruc_patch_util_bls0_lr2e-4_s42_b16_e30
+seed 1024: checkpoints/isruc_dense_bls0_s1024_lr2e-4_b16_e30
+           checkpoints/isruc_patch_util_bls0_s1024_lr2e-4_b16_e30
+seed 3407: checkpoints/isruc_dense_bls0_s3407_lr2e-4_b16_e30
+           checkpoints/isruc_patch_util_bls0_s3407_lr2e-4_b16_e30
+```
+
+### Revised SEED-V primary experiment
+
+SEED-V samples are `(B,62,1,200)`, producing LaBraM tokens `[B,62,1,D]`.
+Patch attention therefore has temporal sequence length one: Q/K gradients are
+approximately zero and there is no temporal patch-to-patch interaction. A
+frozen patch run may still demonstrate added trainable capacity, but it does
+not validate the temporal-patch structure used on ISRUC or FACED.
+
+The primary SEED-V comparison is:
+
+```text
+Model A: frozen LaBraM + shared classifier/head
+Model B: frozen LaBraM + channel-only adapter + identical head
+```
+
+The fixed seed packet is `{42, 1024, 3407}`. Use the existing SEED-V recipe:
+batch size `32`, global LR `1e-4`, 40 epochs, warmup `5`, weight decay `0.03`,
+layer decay `0.65`, drop path `0.1`, smoothing `0.1`, workers `0`, `/100`
+scaling, validation-kappa selection, and no test evaluation during
+development. Use `backbone_lr_scale=0`, `head_lr_scale=1`, channel-only
+`adapter_type=channel` for Model B, adapter core/alpha LR scales `1`, alpha
+init `0.01`, depth off, token MLP off, and patch branch off.
+
+Record `alpha_channel`, raw channel ratio, final residual ratio, channel Q/K/V
+and output-projection gradients, adapter update norms, trainable parameter
+count, validation metrics, selected epoch, and train/validation gap. Retain
+the frozen patch result only as a singleton-axis capacity control. The
+paper-level principle is: use lightweight residual adaptation along a
+meaningful native axis of LaBraM's channel-patch representation.

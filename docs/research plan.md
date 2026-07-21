@@ -638,3 +638,106 @@ validation effect, and no larger train-validation gap. If it passes, confirm
 the frozen recipe on seeds `42` and `1024`, preserving the fixed packet
 `{42, 1024, 3407}`. Do not combine channel and patch branches or add depth in
 this screen.
+
+## ISRUC frozen-backbone result and SEED-V reset (2026-07-20)
+
+The ISRUC backbone-restraint study is complete. All runs use batch size `16`,
+global LR `2e-4`, 30 epochs, sequence-head dropout `0.1`, smoothing `0.1`,
+drop path `0.1`, weight decay `0.05`, and the same checkpoint and ISRUC
+protocol. The frozen packet uses `backbone_lr_scale=0`, `head_lr_scale=1`,
+adapter core LR scale `1`, alpha LR scale `1`, depth off, and token MLP off.
+
+### Frozen ISRUC paired results
+
+| Seed | Dense frozen kappa | Patch frozen kappa | Delta kappa | Delta BA | Delta weighted F1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 42 | 0.58527 | 0.69980 | +0.11452 | +0.14143 | +0.10898 |
+| 1024 | 0.57693 | 0.70673 | +0.12979 | +0.15793 | +0.12075 |
+| 3407 | 0.57950 | 0.70229 | +0.12279 | +0.15018 | +0.11651 |
+| Mean | 0.58057 | 0.70294 | **+0.12237** | **+0.14985** | **+0.11542** |
+
+Patch wins all three paired seeds. The frozen patch validation-kappa peaks
+occur at epochs `19`, `23`, and `19`; the kappa decline from the selected peak
+to epoch 30 is only `0.00315`, `0.00407`, and `0.00525`, respectively. This is
+substantially smaller than the approximately `0.021` decline in the original
+fully fine-tuned patch trajectory, so backbone freezing largely resolves the
+early-overfitting/generalization-collapse pattern.
+
+The adapter is not inactive in this regime. At the selected checkpoints,
+`alpha_patch` is approximately `0.118-0.122`, the final residual ratio is
+approximately `0.366-0.370`, and the raw patch ratio is approximately
+`3.0-3.1`. The result supports a parameter-efficient adaptation mechanism,
+not merely a frozen-model capacity artifact with a silent branch.
+
+The absolute result remains below full fine-tuning. Across the same three
+seeds, the prior fully fine-tuned dense reference averages approximately
+`0.765` kappa, `0.795` BA, and `0.819` weighted F1, whereas frozen patch
+averages `0.703`, `0.725`, and `0.769`. The defensible claim is conditional:
+patch-only residual adaptation is strongly useful when the pretrained
+backbone is frozen, but it does not yet replace full backbone fine-tuning.
+
+Frozen ISRUC run directories:
+
+```text
+seed 42:   isruc_dense_bls0_lr2e-4_s42_b16_e30
+           isruc_patch_util_bls0_lr2e-4_s42_b16_e30
+seed 1024: isruc_dense_bls0_s1024_lr2e-4_b16_e30
+           isruc_patch_util_bls0_s1024_lr2e-4_b16_e30
+seed 3407: isruc_dense_bls0_s3407_lr2e-4_b16_e30
+           isruc_patch_util_bls0_s3407_lr2e-4_b16_e30
+```
+
+### Revised SEED-V experiment
+
+The previous full-backbone dense-versus-channel screen is superseded. The
+primary SEED-V experiment is now a frozen, geometry-matched pair:
+
+```text
+Model A: frozen LaBraM + shared classifier/head
+Model B: frozen LaBraM + channel-only residual adapter + identical head
+```
+
+Use the fixed seed packet `{42, 1024, 3407}` and the existing SEED-V recipe:
+batch size `32`, global LR `1e-4`, 40 epochs, warmup `5`, weight decay `0.03`,
+layer decay `0.65`, drop path `0.1`, smoothing `0.1`, workers `0`, `/100`
+input scaling, validation-kappa checkpoint selection, and no test evaluation
+during development. Set:
+
+```text
+backbone_lr_scale=0
+head_lr_scale=1
+adapter_type=channel for Model B, none for Model A
+adapter_lr_scale=1
+adapter_alpha_lr_scale=1
+adapter_init_alpha=0.01
+depth_mode=none
+token_mlp=false
+patch branch=off
+```
+
+SEED-V supplies samples `(B,62,1,200)`, so the LaBraM grid is `[B,62,1,D]`.
+Patch attention has temporal sequence length one and cannot perform temporal
+patch-to-patch interaction; its Q/K gradients are approximately zero. Channel
+attention has sequence length `62` with meaningful Q/K/V gradients and is the
+primary structure-aware axis for SEED-V.
+
+Record for every seed and both conditions:
+
+```text
+alpha_channel
+raw_channel_ratio
+adapter_delta_ratio
+channel Q/K/V/output-projection gradients
+adapter core/alpha absolute and relative update norms
+trainable parameter count
+train/validation losses and gap
+validation kappa, BA, weighted F1, and selected epoch
+```
+
+The existing frozen patch result remains a singleton-axis capacity control. It
+may show that trainable residual capacity helps on SEED-V, but it must not be
+treated as evidence for temporal patch adaptation. The generalization principle
+is: use lightweight residual adaptation along a meaningful native axis of
+LaBraM's channel-patch representation. Do not add channel-plus-patch, depth,
+token MLP, or further LR sweeps until the frozen dense/channel-only paired
+result is complete.
