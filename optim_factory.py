@@ -59,6 +59,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                          adapter_lr_scale=1.0, adapter_alpha_lr_scale=None,
                          adapter_alpha_name_prefix=None, adapter_weight_decay=None,
                          backbone_lr_scale=1.0, head_lr_scale=1.0,
+                         head_weight_decay=None,
                          head_name_prefix='head.', **kwargs):
     if adapter_lr_scale < 0:
         raise ValueError(f"adapter_lr_scale must be non-negative, got {adapter_lr_scale!r}")
@@ -92,6 +93,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
             is_adapter and adapter_alpha_name_prefix and name.startswith(adapter_alpha_name_prefix)
         )
         is_head = bool(head_name_prefix and name.startswith(head_name_prefix))
+        is_head_weight = is_head and param.ndim > 1 and not name.endswith(".bias") and name not in skip_list
         if param.ndim <= 1 or name.endswith(".bias") or name in skip_list: # param.ndim <= 1 len(param.shape) == 1
             group_name = "no_decay"
             this_weight_decay = 0.
@@ -100,6 +102,8 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
             this_weight_decay = weight_decay
             if is_adapter and adapter_weight_decay is not None:
                 this_weight_decay = adapter_weight_decay
+            if is_head and head_weight_decay is not None:
+                this_weight_decay = head_weight_decay
         if get_num_layer is not None:
             layer_id = get_num_layer(name)
             group_name = "layer_%d_%s" % (layer_id, group_name)
@@ -139,6 +143,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 "is_head": is_head,
                 "is_backbone": not is_adapter and not is_head,
                 "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
+                "head_weight_decay_fixed": is_head_weight and head_weight_decay is not None,
             }
             parameter_group_vars[group_name] = {
                 "group_name": group_name,
@@ -150,6 +155,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                 "is_head": is_head,
                 "is_backbone": not is_adapter and not is_head,
                 "adapter_weight_decay_fixed": is_adapter and adapter_weight_decay is not None,
+                "head_weight_decay_fixed": is_head_weight and head_weight_decay is not None,
             }
 
         parameter_group_vars[group_name]["params"].append(param)

@@ -1439,3 +1439,60 @@ def get_metrics(output, target, metrics, is_binary, threshold=0.5):
             elif metric == "f1_weighted":
                 results[metric] = f1_score(y_true, y_pred, average="weighted")
     return results
+
+
+def classification_diagnostics_from_confusion(confusion, logit_sum=None, logit_sq_sum=None, logit_count=None):
+    """Return class-count, recall/F1, and prediction-concentration diagnostics.
+
+    ``confusion`` uses rows for targets and columns for predictions.  The
+    helper accepts either a NumPy array or a tensor and deliberately returns
+    JSON-friendly Python values for run logs.
+    """
+    if torch.is_tensor(confusion):
+        confusion = confusion.detach().cpu().numpy()
+    confusion = np.asarray(confusion, dtype=np.int64)
+    if confusion.ndim != 2 or confusion.shape[0] != confusion.shape[1]:
+        raise ValueError(f"Expected square confusion matrix, got {confusion.shape}")
+
+    num_classes = confusion.shape[0]
+    target_counts = confusion.sum(axis=1)
+    prediction_counts = confusion.sum(axis=0)
+    true_positive = np.diag(confusion)
+    recall = np.divide(
+        true_positive,
+        target_counts,
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=target_counts > 0,
+    )
+    precision = np.divide(
+        true_positive,
+        prediction_counts,
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=prediction_counts > 0,
+    )
+    f1 = np.divide(
+        2.0 * precision * recall,
+        precision + recall,
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=(precision + recall) > 0,
+    )
+    total = int(target_counts.sum())
+    prediction_fraction = (
+        prediction_counts.astype(np.float64) / total if total else np.zeros(num_classes, dtype=np.float64)
+    )
+    diagnostics = {
+        **{f"target_count_class_{i}": int(value) for i, value in enumerate(target_counts)},
+        **{f"prediction_count_class_{i}": int(value) for i, value in enumerate(prediction_counts)},
+        **{f"prediction_fraction_class_{i}": float(value) for i, value in enumerate(prediction_fraction)},
+        "per_class_recall": recall.tolist(),
+        "per_class_f1": f1.tolist(),
+        "confusion_matrix": confusion.tolist(),
+        "majority_prediction_fraction": float(prediction_fraction.max()) if total else 0.0,
+        "number_of_predicted_classes": int(np.count_nonzero(prediction_counts)),
+    }
+    if logit_sum is not None and logit_sq_sum is not None and logit_count:
+        mean = float(logit_sum / logit_count)
+        variance = max(float(logit_sq_sum / logit_count) - mean * mean, 0.0)
+        diagnostics["logit_mean"] = mean
+        diagnostics["logit_std"] = variance ** 0.5
+    return diagnostics

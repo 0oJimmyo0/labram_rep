@@ -136,9 +136,13 @@ def get_args():
                         help='Multiplier on the effective LR for pretrained non-head parameters.')
     parser.add_argument('--head_lr_scale', default=1.0, type=float,
                         help='Multiplier on the effective LR for the classifier head.')
+    parser.add_argument('--head_weight_decay', default=None, type=float,
+                        help='Override weight decay for classifier weights; bias remains unregularized.')
     parser.add_argument('--labram_backbone_mode', default='trainable',
                         choices=['trainable', 'frozen'],
                         help='Optimize the pretrained backbone or train only the head and enabled adapter.')
+    parser.add_argument('--frozen_backbone_eval_mode', action='store_true', default=False,
+                        help='Keep frozen LaBraM modules in eval mode during head/adapter training.')
     parser.add_argument('--labram_adapter_fixed_alpha', default=None, type=float,
                         help='Keep every enabled adapter alpha fixed at this value and exclude it from optimization.')
     parser.add_argument('--labram_adapter_weight_decay', default=None, type=float,
@@ -603,6 +607,8 @@ def main(args, ds_init):
             assert adapter_trainable == 0
         else:
             assert adapter_trainable > 0
+    if args.frozen_backbone_eval_mode and args.labram_backbone_mode != 'frozen':
+        raise ValueError('--frozen_backbone_eval_mode requires --labram_backbone_mode frozen')
 
     model.to(device)
 
@@ -666,7 +672,8 @@ def main(args, ds_init):
             adapter_alpha_name_prefix='native_axis_adapter.alpha_',
             adapter_weight_decay=args.labram_adapter_weight_decay,
             backbone_lr_scale=args.backbone_lr_scale,
-            head_lr_scale=args.head_lr_scale)
+            head_lr_scale=args.head_lr_scale,
+            head_weight_decay=args.head_weight_decay)
         model, optimizer, _, _ = ds_init(
             args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
         )
@@ -688,7 +695,8 @@ def main(args, ds_init):
             adapter_alpha_name_prefix='native_axis_adapter.alpha_',
             adapter_weight_decay=args.labram_adapter_weight_decay,
             backbone_lr_scale=args.backbone_lr_scale,
-            head_lr_scale=args.head_lr_scale)
+            head_lr_scale=args.head_lr_scale,
+            head_weight_decay=args.head_weight_decay)
         loss_scaler = NativeScaler()
 
     if not args.enable_deepspeed:
@@ -764,7 +772,8 @@ def main(args, ds_init):
         'warmup_epochs': int(args.warmup_epochs),
         'seed': int(args.seed),
         'backbone_mode': args.labram_backbone_mode,
-        'frozen_backbone_eval_mode': False,
+        'backbone_frozen': bool(args.labram_backbone_mode == 'frozen'),
+        'frozen_backbone_eval_mode': bool(args.frozen_backbone_eval_mode),
         'trainability_summary': trainability_summary,
         'total_parameter_count': int(sum(p.numel() for p in model_without_ddp.parameters())),
         'trainable_parameter_count': int(sum(
@@ -810,6 +819,9 @@ def main(args, ds_init):
         ),
         'backbone_lr_scale': float(args.backbone_lr_scale),
         'head_lr_scale': float(args.head_lr_scale),
+        'head_weight_decay': (
+            None if args.head_weight_decay is None else float(args.head_weight_decay)
+        ),
         'adapter_fixed_alpha': (
             None if args.labram_adapter_fixed_alpha is None
             else float(args.labram_adapter_fixed_alpha)
@@ -903,7 +915,8 @@ def main(args, ds_init):
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq, 
             ch_names=ch_names, is_binary=args.nb_classes == 1,
-            input_scale_divisor=args.input_scale_divisor
+            input_scale_divisor=args.input_scale_divisor,
+            frozen_backbone_eval_mode=args.frozen_backbone_eval_mode,
         )
         
         if data_loader_val is not None:

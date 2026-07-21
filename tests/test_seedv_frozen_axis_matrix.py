@@ -12,6 +12,7 @@ from run_class_finetuning import (
     assert_optimizer_matches_trainability,
     configure_labram_trainability,
 )
+from engine_for_finetuning import set_frozen_labram_eval_mode
 
 
 def build_model(adapter_type="none"):
@@ -95,6 +96,22 @@ def test_seedv_patch_is_singleton_capacity_control():
     assert diagnostics["patch_k_grad_norm"] <= 1e-8
     assert "raw_channel_ratio" not in diagnostics
     del logits, model
+    gc.collect()
+
+
+def test_frozen_backbone_eval_mode_is_deterministic_but_head_is_trainable():
+    model = build_model("none")
+    model.train(True)
+    set_frozen_labram_eval_mode(model)
+    assert not model.blocks[0].training
+    assert model.head.training
+
+    samples = torch.randn(2, 62, 1, 200)
+    with torch.no_grad():
+        features_a = model.forward_features(samples)
+        features_b = model.forward_features(samples)
+    assert torch.equal(features_a, features_b)
+    del model, samples, features_a, features_b
     gc.collect()
 
 

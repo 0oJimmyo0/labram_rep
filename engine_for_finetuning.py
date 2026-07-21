@@ -10,6 +10,7 @@
 import math
 import sys
 from typing import Iterable, Optional
+import numpy as np
 import torch
 from timm.utils import ModelEma
 import utils
@@ -90,17 +91,31 @@ def get_loss_scale_for_deepspeed(model):
     return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
 
 
+def set_frozen_labram_eval_mode(model: torch.nn.Module) -> None:
+    """Keep the frozen LaBraM representation deterministic during adaptation."""
+    core = model.module if hasattr(model, "module") else model
+    core.eval()
+    if hasattr(core, "head"):
+        core.head.train()
+    adapter = getattr(core, "native_axis_adapter", None)
+    if adapter is not None:
+        adapter.train()
+
+
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, log_writer=None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
                     num_training_steps_per_epoch=None, update_freq=None, ch_names=None,
-                    is_binary=True, input_scale_divisor=100.0):
+                    is_binary=True, input_scale_divisor=100.0,
+                    frozen_backbone_eval_mode=False):
     input_chans = None
     if ch_names is not None:
         input_chans = utils.get_input_chans(ch_names)
     model.train(True)
+    if frozen_backbone_eval_mode:
+        set_frozen_labram_eval_mode(model)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -120,6 +135,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     adapter_step_snapshot = None
     geometry_reported = False
+    frozen_feature_repeat_diff = None
+    train_confusion = None
+    train_logit_sum = 0.0
+    train_logit_sq_sum = 0.0
+    train_logit_count = 0
 
     for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
@@ -132,7 +152,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 if lr_schedule_values is not None:
                     param_group["lr"] = lr_schedule_values[it] * param_group.get("lr_scale", 1.0)
                 if (wd_schedule_values is not None and param_group["weight_decay"] > 0
-                        and not param_group.get("adapter_weight_decay_fixed", False)):
+                        and not param_group.get("adapter_weight_decay_fixed", False)
+                        and not param_group.get("head_weight_decay_fixed", False)):
                     param_group["weight_decay"] = wd_schedule_values[it]
 
         if loss_scaler is not None and data_iter_step % update_freq == 0:
@@ -141,6 +162,27 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         samples = samples.float().to(device, non_blocking=True) / input_scale_divisor
         samples = ensure_patch_tensor(samples, patch_size=200)
         input_time_window = samples.shape[3] if samples.ndim == 5 else (samples.shape[2] if samples.shape[-1] == 200 else samples.shape[-1])
+
+        if frozen_backbone_eval_mode and frozen_feature_repeat_diff is None:
+            core_model = model.module if hasattr(model, 'module') else model
+            # Check the frozen representation in full eval mode, then restore
+            # train mode only for the explicitly trainable head/adapter.
+            core_model.eval()
+            with torch.no_grad():
+                features_a = core_model.forward_features(samples, input_chans=input_chans)
+                features_b = core_model.forward_features(samples, input_chans=input_chans)
+            frozen_feature_repeat_diff = float((features_a - features_b).abs().max().cpu())
+            if not torch.equal(features_a, features_b):
+                raise RuntimeError(
+                    "Frozen LaBraM feature extraction is nondeterministic; "
+                    f"maximum repeat difference={frozen_feature_repeat_diff:.6g}"
+                )
+            set_frozen_labram_eval_mode(model)
+            if not core_model.head.training:
+                raise RuntimeError("Frozen-backbone eval mode left the classifier head in eval mode")
+            adapter = getattr(core_model, "native_axis_adapter", None)
+            if adapter is not None and not adapter.training:
+                raise RuntimeError("Frozen-backbone eval mode left the trainable adapter in eval mode")
         
         targets = targets.to(device, non_blocking=True)
         if is_binary:
@@ -204,6 +246,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     + ",".join(loss_scaler.last_nonfinite_group_names),
                     flush=True,
                 )
+            classifier_grad_sq = 0.0
+            for parameter in core_model.head.parameters():
+                if parameter.grad is not None:
+                    classifier_grad_sq += float(parameter.grad.detach().float().pow(2).sum().cpu())
+            adapter_diagnostics['classifier_grad_norm'] = classifier_grad_sq ** 0.5
             if hasattr(core_model, 'get_adapter_diagnostics'):
                 # NativeScaler performs backward, unscaling, and optimizer.step,
                 # but it does not clear gradients. Capture them before zero_grad.
@@ -243,7 +290,22 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if is_binary:
             class_acc = utils.get_metrics(torch.sigmoid(output).detach().cpu().numpy(), targets.detach().cpu().numpy(), ["accuracy"], is_binary)["accuracy"]
         else:
-            class_acc = (output.max(-1)[-1] == targets.squeeze()).float().mean()
+            flat_output = output.detach().float().reshape(-1, output.shape[-1])
+            flat_targets = targets.detach().long().reshape(-1)
+            flat_predictions = flat_output.argmax(dim=-1)
+            num_classes = flat_output.shape[-1]
+            batch_confusion = torch.bincount(
+                flat_targets * num_classes + flat_predictions,
+                minlength=num_classes * num_classes,
+            ).reshape(num_classes, num_classes).to(dtype=torch.float64)
+            if train_confusion is None:
+                train_confusion = batch_confusion
+            else:
+                train_confusion += batch_confusion
+            train_logit_sum += float(flat_output.sum().cpu())
+            train_logit_sq_sum += float(flat_output.square().sum().cpu())
+            train_logit_count += int(flat_output.numel())
+            class_acc = (flat_predictions == flat_targets).float().mean()
             
         metric_logger.update(loss=loss_value)
         metric_logger.update(class_acc=class_acc)
@@ -307,7 +369,24 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    if frozen_feature_repeat_diff is not None:
+        stats['frozen_feature_repeat_diff'] = frozen_feature_repeat_diff
+    if not is_binary and train_confusion is not None:
+        utils.all_reduce(train_confusion)
+        reduction = torch.tensor(
+            [train_logit_sum, train_logit_sq_sum, float(train_logit_count)],
+            dtype=torch.float64,
+            device=train_confusion.device,
+        )
+        utils.all_reduce(reduction)
+        stats.update(utils.classification_diagnostics_from_confusion(
+            train_confusion,
+            logit_sum=float(reduction[0].cpu()),
+            logit_sq_sum=float(reduction[1].cpu()),
+            logit_count=int(reduction[2].cpu()),
+        ))
+    return stats
 
 
 @torch.no_grad()
@@ -365,4 +444,18 @@ def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=
 
     ret = utils.get_metrics(pred, true, metrics, is_binary, 0.5)
     ret['loss'] = metric_logger.loss.global_avg
+    if not is_binary:
+        prediction = np.argmax(pred, axis=-1).reshape(-1)
+        target = true.reshape(-1).astype(np.int64)
+        num_classes = pred.shape[-1]
+        confusion = np.bincount(
+            target * num_classes + prediction,
+            minlength=num_classes * num_classes,
+        ).reshape(num_classes, num_classes)
+        ret.update(utils.classification_diagnostics_from_confusion(
+            confusion,
+            logit_sum=float(pred.sum()),
+            logit_sq_sum=float(np.square(pred).sum()),
+            logit_count=int(pred.size),
+        ))
     return ret

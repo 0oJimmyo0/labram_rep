@@ -33,12 +33,15 @@ def test_backbone_head_and_adapter_lr_precedence():
         adapter_alpha_lr_scale=0.1,
         backbone_lr_scale=0.1,
         head_lr_scale=1.0,
+        head_weight_decay=0.0,
     )
 
     assert _group_for(groups, model.blocks[0].weight)['lr_scale'] == 0.1
     assert _group_for(groups, model.native_axis_adapter.core.weight)['lr_scale'] == 1.0
     assert _group_for(groups, model.native_axis_adapter.alpha_channel)['lr_scale'] == 0.1
     assert _group_for(groups, model.head.weight)['lr_scale'] == 1.0
+    assert _group_for(groups, model.head.weight)['weight_decay'] == 0.0
+    assert _group_for(groups, model.head.weight)['head_weight_decay_fixed']
 
     assert _group_for(groups, model.blocks[0].weight)['is_backbone']
     assert _group_for(groups, model.head.weight)['is_head']
