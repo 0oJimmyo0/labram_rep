@@ -70,6 +70,10 @@ case "$LABRAM_BACKBONE_MODE" in
 esac
 
 if [[ "$LABRAM_BACKBONE_MODE" == "frozen" ]]; then
+  if [[ "$BACKBONE_LR_SCALE" != "0.0" ]]; then
+    echo "ERROR: Frozen SEED-V runs require BACKBONE_LR_SCALE=0.0" >&2
+    exit 1
+  fi
   if [[ "$LABRAM_ADAPTER_DEPTH_MODE" != "none" ]]; then
     echo "ERROR: Initial frozen SEED-V block requires depth_mode=none" >&2
     exit 1
