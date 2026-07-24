@@ -88,7 +88,12 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
                     flag = True
             if flag:
                 continue
-        is_adapter = bool(adapter_name_prefix and name.startswith(adapter_name_prefix))
+        # LoRA is a separate generic control, but its trainable A/B matrices
+        # still need the adapter LR/decay bucket when the lora mode is used.
+        is_adapter = bool(
+            (adapter_name_prefix and name.startswith(adapter_name_prefix))
+            or ".lora_A" in name or ".lora_B" in name
+        )
         is_adapter_alpha = bool(
             is_adapter and adapter_alpha_name_prefix and name.startswith(adapter_alpha_name_prefix)
         )

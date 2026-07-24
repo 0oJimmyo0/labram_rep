@@ -302,8 +302,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 train_confusion = batch_confusion
             else:
                 train_confusion += batch_confusion
-            train_logit_sum += float(flat_output.sum().cpu())
-            train_logit_sq_sum += float(flat_output.square().sum().cpu())
+            # Accumulate diagnostics in float64 so large logits do not make
+            # the reported variance overflow while the actual metrics remain
+            # finite.
+            flat_output64 = flat_output.double()
+            train_logit_sum += float(flat_output64.sum().cpu())
+            train_logit_sq_sum += float(flat_output64.square().sum().cpu())
             train_logit_count += int(flat_output.numel())
             class_acc = (flat_predictions == flat_targets).float().mean()
             
@@ -454,8 +458,8 @@ def evaluate(data_loader, model, device, header='Test:', ch_names=None, metrics=
         ).reshape(num_classes, num_classes)
         ret.update(utils.classification_diagnostics_from_confusion(
             confusion,
-            logit_sum=float(pred.sum()),
-            logit_sq_sum=float(np.square(pred).sum()),
+            logit_sum=float(np.asarray(pred, dtype=np.float64).sum()),
+            logit_sq_sum=float(np.square(np.asarray(pred, dtype=np.float64)).sum()),
             logit_count=int(pred.size),
         ))
     return ret

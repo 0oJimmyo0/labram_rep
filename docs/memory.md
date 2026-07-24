@@ -1,6 +1,74 @@
 # LaBraM Adapter Progress Memory
 
-Last updated: 2026-07-20
+> **Current canonical handoff added 2026-07-23.** The unified scientific plan
+> is [`cross_backbone_execution_plan.md`](cross_backbone_execution_plan.md).
+> The chronological material below is retained as historical evidence; new
+> LaBraM work must follow the current handoff and contract.
+
+## Current paper identity and repository boundary
+
+The revised paper is **Interaction-Aligned Adaptation for EEG Foundation
+Models**. This repository owns LaBraM experiments only:
+
+- repository: `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM`;
+- branch: `adaptor`;
+- audit HEAD: `973b61f`;
+- working tree at audit: clean;
+- CBraMod experiments belong only in
+  `/data/neurogroup/mingyangjiang/EEGxPlore/EEGxPlore`.
+
+Never import or wire the CBraMod backbone into LaBraM training, and never use
+the historical EEGxPlore LaBraM-substitution path as a LaBraM paper result.
+
+## Current verified implementation facts
+
+- `modeling_finetune.py:280-426` defines
+  `LaBraMNativeAxisResidualAdapter` over `[B,C,S,D]`.
+- Channel attention and patch attention are separate native-axis branches;
+  `modeling_finetune.py:748-839` exposes feature and depth-summary flow.
+- `run_class_finetuning.py:113-158` defines adapter/depth controls and
+  `run_class_finetuning.py:629-705` constructs optimizer groups.
+- Exact parity, geometry, LR-group, frozen-axis, and data-contract tests exist
+  under `tests/`.
+- The historical pilot mixer is full-width multihead attention. The new common
+  paper-grade low-rank primitive now uses rank-32 Down/Mixer/Up branches and
+  passes construction, geometry, gradient, and gamma-zero parity checks;
+  matched control experiments remain pending.
+
+## Confirmed pilot conclusions
+
+- SEED-V realized geometry is `[B,62,1,200]`: channel interaction is eligible;
+  temporal patch interaction is degenerate.
+- The channel adaptor has nonzero Q/K/V gradients and delays early
+  memorization, especially with `backbone_lr_scale=0.1` and adaptor weight
+  decay `0.1`.
+- Across the matched development packet, the channel performance advantage over
+  dense is mixed and modest; it is not yet a universal performance claim.
+- The shorter 30-epoch final packet underfit relative to the 40-epoch recipe.
+- Depth and patch-axis results are diagnostic and must not be promoted to the
+  primary claim without the common low-rank, matched-budget protocol.
+
+## Current LaBraM sequence
+
+1. Finish ISRUC protocol replication and dense baseline.
+2. Implement and parity-test the common low-rank axis primitive. (Complete;
+   ISRUC confirmation and matched controls remain pending.)
+3. Add matched upper-k, LoRA, generic bottleneck, and axis-blind controls.
+4. Complete formal LaBraM ISRUC, FACED, and TUEV matrix; add PhysioNet-MI only
+   after its data audit.
+5. Freeze LaBraM method/protocol before final five-seed test access.
+6. Only then return to CBraMod in EEGxPlore for the parallel protocol audit.
+
+## Current status labels
+
+- `verified`: implementation/parity/data facts supported by tests or audits;
+- `pilot`: existing SEED-V/FACED/ISRUC training evidence under the former
+  native full-width adapter protocol;
+- `historical`: old workflow, old jobs, or substitution-path results;
+- `pending`: required for the revised paper;
+- `blocked`: only when an external data/provenance dependency prevents progress.
+
+Last updated: 2026-07-23
 
 ## Repository State
 
@@ -746,3 +814,74 @@ count, validation metrics, selected epoch, and train/validation gap. Retain
 the frozen patch result only as a singleton-axis capacity control. The
 paper-level principle is: use lightweight residual adaptation along a
 meaningful native axis of LaBraM's channel-patch representation.
+
+The low-rank aligned adapter is conceptually separate from LoRA. Low-rank here
+means `Down -> native channel/patch mixer -> Up` inside the structure-aware
+residual branch. LoRA is an independent generic PEFT baseline that modifies
+backbone linear weights. We do not combine LoRA with the native channel,
+patch, or channel+patch adapter in the primary matrix.
+
+## ISRUC current-HEAD native-axis pilot and run-ladder rule (2026-07-23)
+
+The current-HEAD ISRUC seed-42 comparison completed with test evaluation:
+
+| Condition | Best val kappa / BA | Test BA / kappa |
+| --- | ---: | ---: |
+| Dense | 0.7673 / 0.7940 | 0.7997 / 0.7583 |
+| Channel | 0.7711 / 0.8020 | 0.7915 / 0.7481 |
+| Patch | 0.7698 / 0.8007 | 0.7912 / 0.7475 |
+| Channel+patch | 0.7695 / 0.8003 | 0.7918 / 0.7474 |
+
+All conditions peak around epoch 12-18 while training accuracy continues to
+about 0.91, so the early overfitting pattern remains. The channel adapter is
+active on the intended `[B,6,30,D]` geometry with nonzero Q/K/V gradients, but
+its validation advantage does not transfer to this single test split. These
+full-width attention results are pilot evidence only; they are not the final
+parameter-matched common primitive.
+
+For every backbone-dataset cell, complete the bounded run ladder once:
+
+```text
+protocol gate
+  -> frozen/full/upper-k baseline
+  -> LoRA / generic / axis-blind controls
+  -> matched low-rank interaction-aligned adapter
+  -> channel-off/patch-off/both-axis and one depth extension
+  -> stop single-seed tuning and run development multiseeds
+  -> freeze method and run final five-seed test block
+```
+
+Test metrics may be recorded for every run, but validation remains the only
+criterion for checkpoint, architecture, and hyperparameter selection during
+development. Once a section passes its promotion gate, do not keep expanding
+its LR sweep; move to multiseed confirmation.
+
+### ISRUC low-rank aligned screen (2026-07-24)
+
+The current-HEAD rank-32 low-rank screen completed on seed 42 with final test
+evaluation. The dense anchor reproduced the prior result: primary test BA
+`0.79965`, kappa `0.75834`. Low-rank channel, patch, and channel+patch all
+peaked near epoch 12 with validation BA around `0.801-0.802`, but their test
+BA was only `0.7915`, `0.7923`, and `0.7920`, respectively. They therefore do
+not yet pass the promotion gate.
+
+The main mechanism finding is that rank-32 residuals were extremely small:
+about `0.005%` of the backbone feature norm, approximately 50 times smaller
+than the earlier full-width pilot residuals. The branches had nonzero Q/K/V
+gradients, so they were not disconnected, but the adapter was practically
+under-scaled. The next bounded calibration is `adapter_init_alpha=0.5` for
+channel, patch, and channel+patch, with all other settings fixed. Do not add a
+new LR sweep or depth branch before evaluating this calibration. If it produces
+a coherent validation/test effect and an appropriately active residual, stop
+single-seed tuning and promote the selected method to development multiseeds.
+
+### ISRUC controls queued (2026-07-24)
+
+LaBraM now has three separate controls for the overnight comparison:
+`BACKBONE_MODE=lora` injects LoRA into attention `qkv` projections and trains
+only LoRA factors plus the head; `ADAPTER_TYPE=generic` is an axis-blind
+token-wise residual bottleneck; and `BACKBONE_MODE=upper_k` trains the final K
+Transformer blocks plus the sequence/head layers. LoRA is not combined with
+the native channel/patch adapter. All controls use the same ISRUC manifest,
+checkpoint, batch size, epoch budget, validation-kappa selection, and final
+test evaluation.

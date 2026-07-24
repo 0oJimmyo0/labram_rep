@@ -37,10 +37,14 @@ from scipy import interpolate
 import modeling_finetune
 
 
-def configure_labram_trainability(model, backbone_mode):
+def configure_labram_trainability(model, backbone_mode, upper_k=2):
     """Configure and summarize LaBraM backbone/head/adapter trainability."""
-    if backbone_mode not in {"trainable", "frozen"}:
+    if backbone_mode not in {"trainable", "frozen", "upper_k", "lora"}:
         raise ValueError(f"Unsupported backbone_mode={backbone_mode!r}")
+    if backbone_mode == "upper_k":
+        upper_k = int(upper_k)
+        if upper_k <= 0 or upper_k > len(model.blocks):
+            raise ValueError(f"upper_k must be in [1, {len(model.blocks)}], got {upper_k}")
 
     summary = {
         "backbone": {"total": 0, "trainable": 0},
@@ -48,19 +52,34 @@ def configure_labram_trainability(model, backbone_mode):
         "adapter": {"total": 0, "trainable": 0},
     }
     for name, parameter in model.named_parameters():
-        if name.startswith("native_axis_adapter."):
+        if name.startswith("native_axis_adapter.") or ".lora_A" in name or ".lora_B" in name:
             component = "adapter"
         elif name.startswith("head."):
             component = "head"
         else:
             component = "backbone"
-        should_train = backbone_mode == "trainable" or component in {"head", "adapter"}
+        if backbone_mode == "trainable":
+            should_train = True
+        elif backbone_mode in {"frozen", "lora"}:
+            should_train = component in {"head", "adapter"}
+        else:
+            block_index = None
+            if name.startswith("blocks."):
+                try:
+                    block_index = int(name.split('.')[1])
+                except (IndexError, ValueError):
+                    block_index = None
+            should_train = (
+                component == "head"
+                or (block_index is not None and block_index >= len(model.blocks) - upper_k)
+                or name.startswith(("norm.", "fc_norm.", "sequence_encoder."))
+            )
         parameter.requires_grad_(should_train)
         summary[component]["total"] += parameter.numel()
         if parameter.requires_grad:
             summary[component]["trainable"] += parameter.numel()
 
-    if backbone_mode == "frozen":
+    if backbone_mode in {"frozen", "lora"}:
         if summary["backbone"]["trainable"] != 0:
             raise RuntimeError("Frozen-backbone mode left trainable backbone parameters.")
         if summary["head"]["trainable"] == 0:
@@ -111,7 +130,7 @@ def get_args():
                         help="0.1 for base, 1e-5 for large. set 0 to disable layer scale")
 
     parser.add_argument('--labram_adapter_type', default='none',
-                        choices=['none', 'channel', 'patch', 'channel_patch'],
+                        choices=['none', 'generic', 'channel', 'patch', 'channel_patch'],
                         help='LaBraM-native structured residual adapter branch.')
     parser.add_argument('--labram_adapter_bottleneck', default=64, type=int,
                         help='Bottleneck width for the optional token MLP or singleton patch residual.')
@@ -120,8 +139,8 @@ def get_args():
     parser.add_argument('--labram_adapter_dropout', default=0.0, type=float,
                         help='Dropout inside attention weights and the optional token MLP.')
     parser.add_argument('--labram_adapter_variant', default='full',
-                        choices=['full', 'output_dropout', 'bottleneck'],
-                        help='Patch branch variant: full attention, attention plus output dropout, or bottleneck residual.')
+                        choices=['full', 'output_dropout', 'bottleneck', 'low_rank'],
+                        help='Native-axis branch variant: full-width attention, output dropout, singleton bottleneck, or low-rank Down-Mixer-Up.')
     parser.add_argument('--labram_adapter_patch_output_dropout', default=0.0, type=float,
                         help='Dropout applied to the patch branch output after attention.')
     parser.add_argument('--labram_adapter_init_alpha', default=0.01, type=float,
@@ -139,8 +158,18 @@ def get_args():
     parser.add_argument('--head_weight_decay', default=None, type=float,
                         help='Override weight decay for classifier weights; bias remains unregularized.')
     parser.add_argument('--labram_backbone_mode', default='trainable',
-                        choices=['trainable', 'frozen'],
-                        help='Optimize the pretrained backbone or train only the head and enabled adapter.')
+                        choices=['trainable', 'frozen', 'upper_k', 'lora'],
+                        help='trainable=full FT, frozen=head+adapter, upper_k=last blocks+head, lora=LoRA+head.')
+    parser.add_argument('--labram_upper_k', default=2, type=int,
+                        help='Number of final Transformer blocks to train in upper_k mode.')
+    parser.add_argument('--labram_lora_rank', default=8, type=int,
+                        help='Rank for the separate generic LoRA control.')
+    parser.add_argument('--labram_lora_alpha', default=16.0, type=float,
+                        help='Scaling alpha for the separate generic LoRA control.')
+    parser.add_argument('--labram_lora_dropout', default=0.0, type=float,
+                        help='Dropout on the LoRA input branch.')
+    parser.add_argument('--labram_lora_target', default='qkv', type=str,
+                        help='Comma-separated attention projections for LoRA: qkv, proj.')
     parser.add_argument('--frozen_backbone_eval_mode', action='store_true', default=False,
                         help='Keep frozen LaBraM modules in eval mode during head/adapter training.')
     parser.add_argument('--labram_adapter_fixed_alpha', default=None, type=float,
@@ -341,6 +370,15 @@ def get_models(args):
         isruc_sequence_length=20,
         isruc_sequence_dropout=args.isruc_sequence_dropout,
     )
+
+    if args.labram_backbone_mode == 'lora':
+        modeling_finetune.inject_lora(
+            model,
+            rank=args.labram_lora_rank,
+            alpha=args.labram_lora_alpha,
+            dropout=args.labram_lora_dropout,
+            target=args.labram_lora_target,
+        )
 
     return model
 
@@ -587,11 +625,27 @@ def main(args, ds_init):
             if "relative_position_index" in key:
                 checkpoint_model.pop(key)
 
+        # LoRA wraps the original projection as ``*.base``.  Remap only the
+        # frozen checkpoint weights; fresh lora_A/B parameters retain their
+        # exact-zero update initialization.
+        if args.labram_backbone_mode == 'lora':
+            remapped = OrderedDict()
+            model_keys = model.state_dict()
+            for key, value in checkpoint_model.items():
+                key_parts = key.rsplit('.', 1)
+                wrapped_key = (
+                    key_parts[0] + '.base.' + key_parts[1]
+                    if len(key_parts) == 2 else key
+                )
+                remapped[wrapped_key if wrapped_key in model_keys else key] = value
+            checkpoint_model = remapped
+
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
 
     trainability_summary = configure_labram_trainability(
         model,
         backbone_mode=args.labram_backbone_mode,
+        upper_k=args.labram_upper_k,
     )
     print(
         "Trainability summary: "
@@ -599,7 +653,7 @@ def main(args, ds_init):
         flush=True,
     )
     dataset_key = str(args.dataset).upper().replace('_', '-')
-    if dataset_key in {'SEED-V', 'SEEDV'} and args.labram_backbone_mode == 'frozen':
+    if dataset_key in {'SEED-V', 'SEEDV'} and args.labram_backbone_mode in {'frozen', 'lora'}:
         adapter_trainable = trainability_summary['adapter']['trainable']
         assert trainability_summary['backbone']['trainable'] == 0
         assert trainability_summary['head']['trainable'] > 0
@@ -626,7 +680,7 @@ def main(args, ds_init):
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     adapter_parameter_count = sum(
         p.numel() for name, p in model_without_ddp.named_parameters()
-        if name.startswith('native_axis_adapter.')
+        if name.startswith('native_axis_adapter.') or '.lora_A' in name or '.lora_B' in name
     )
 
     print("Model = %s" % str(model_without_ddp))
@@ -772,7 +826,12 @@ def main(args, ds_init):
         'warmup_epochs': int(args.warmup_epochs),
         'seed': int(args.seed),
         'backbone_mode': args.labram_backbone_mode,
-        'backbone_frozen': bool(args.labram_backbone_mode == 'frozen'),
+        'backbone_frozen': bool(args.labram_backbone_mode in {'frozen', 'lora'}),
+        'upper_k': int(args.labram_upper_k),
+        'lora_rank': int(args.labram_lora_rank),
+        'lora_alpha': float(args.labram_lora_alpha),
+        'lora_dropout': float(args.labram_lora_dropout),
+        'lora_target': args.labram_lora_target,
         'frozen_backbone_eval_mode': bool(args.frozen_backbone_eval_mode),
         'trainability_summary': trainability_summary,
         'total_parameter_count': int(sum(p.numel() for p in model_without_ddp.parameters())),
@@ -1009,6 +1068,16 @@ def main(args, ds_init):
     # a sensitivity checkpoint without using test results for selection.
     if not args.skip_final_test and data_loader_test is not None and data_loader_val is not None:
         eval_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
+        def _mean_test_stat(stats_list, key):
+            """Average scalar test stats while preserving vector/matrix diagnostics."""
+            values = [item[key] for item in stats_list if key in item]
+            if not values:
+                raise KeyError(f"Missing test statistic: {key}")
+            first = values[0]
+            if isinstance(first, (list, tuple, np.ndarray)):
+                return np.asarray(values, dtype=np.float64).mean(axis=0).tolist()
+            return float(np.mean(values))
+
         def _evaluate_selected_checkpoint(filename, label):
             checkpoint_path = os.path.join(args.output_dir, filename)
             if not os.path.isfile(checkpoint_path):
@@ -1022,7 +1091,7 @@ def main(args, ds_init):
                 for loader in eval_loaders
             ]
             stats = {
-                key: float(np.mean([item[key] for item in stats_list if key in item]))
+                key: _mean_test_stat(stats_list, key)
                 for key in stats_list[0]
             }
             print(

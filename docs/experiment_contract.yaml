@@ -1,0 +1,66 @@
+contract_version: 1
+last_updated: "2026-07-23"
+canonical_plan: "LaBraM/docs/cross_backbone_execution_plan.md"
+repository_boundary:
+  cbramod_repo: "/data/neurogroup/mingyangjiang/EEGxPlore/EEGxPlore"
+  cbramod_branch: "SEED-V"
+  labram_repo: "/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM"
+  labram_branch: "adaptor"
+  forbidden_cross_wiring: true
+  rule: "CBraMod runs stay in EEGxPlore; LaBraM runs stay in LaBraM."
+paper:
+  identity: "Interaction-Aligned Adaptation for EEG Foundation Models"
+  primary_hypothesis: "Matched interaction-aligned residual adaptation improves performance-efficiency trade-off over generic PEFT and upper-layer controls."
+  fallback_identity: "When Does Structure-Aware PEFT Help EEG Foundation Models? A Controlled Study Across CBraMod and LaBraM."
+adapter:
+  primitive: "z=Down(LayerNorm(h)); m=AxisMixer(z,axis); delta=Up(m); h_out=h+alpha*delta"
+  low_rank_required: true
+  zero_residual_parity_required: true
+  eligible_channel: "C > 1"
+  eligible_patch: "S > 1"
+  primary_depth: false
+  primary_moe: false
+  primary_context_features: false
+parameter_matching:
+  tolerance_fraction: 0.05
+  target: "interaction_aligned_adapter_trainable_parameters"
+  controls: [lora, generic_bottleneck_adapter, axis_blind_adapter]
+datasets:
+  primary_shared: [FACED, ISRUC, TUEV]
+  mechanism: [SEED-V]
+  optional: [PhysioNet-MI]
+  development_seeds: [42, 1024, 3407]
+  final_seed_count: 5
+selection:
+  development_metric: validation_cohen_kappa
+  validation_sensitivity_metric: validation_balanced_accuracy
+  primary_test_metrics: [balanced_accuracy, macro_f1]
+  secondary_test_metrics: [cohen_kappa, weighted_f1]
+  test_access_during_development: false
+  test_access_after_freeze: true
+methods:
+  - frozen_probe
+  - full_finetune
+  - upper_k_finetune
+  - lora
+  - generic_bottleneck_adapter
+  - axis_blind_parameter_matched_adapter
+  - interaction_aligned_adapter
+  - interaction_aligned_plus_depth
+  - axis_ablations
+required_run_metadata:
+  - repository_commit
+  - clean_tree_status
+  - dataset_artifact_hash
+  - split_hash
+  - channel_manifest_hash
+  - pretrained_checkpoint_hash
+  - complete_cli_or_config
+  - trainable_module_names
+  - trainable_parameter_count
+  - optimizer_groups
+  - seed
+  - best_validation_epoch
+  - final_test_metrics
+  - timing_memory_throughput
+status_labels: [verified, pilot, exploratory, historical, pending, blocked]

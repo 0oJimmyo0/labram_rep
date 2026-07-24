@@ -147,7 +147,11 @@ class Attention(nn.Module):
         if self.q_bias is not None:
             qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
         # qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
+        # Keep the separate q/v bias convention used by the original LaBraM
+        # checkpoint, while allowing qkv to be replaced by a LoRA wrapper.
+        qkv = self.qkv(x)
+        if qkv_bias is not None:
+            qkv = qkv + qkv_bias
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple) (B, H, N, C)
         if self.q_norm is not None:
@@ -296,9 +300,9 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
     ):
         super().__init__()
         patch_variant = str(patch_variant).strip().lower()
-        if patch_variant not in {"full", "output_dropout", "bottleneck"}:
+        if patch_variant not in {"full", "output_dropout", "bottleneck", "low_rank"}:
             raise ValueError(
-                "patch_variant must be one of: full, output_dropout, bottleneck; "
+                "patch_variant must be one of: full, output_dropout, bottleneck, low_rank; "
                 f"got {patch_variant!r}"
             )
         if not 0.0 <= float(patch_output_dropout) < 1.0:
@@ -307,12 +311,21 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             )
         if int(bottleneck) <= 0:
             raise ValueError(f"bottleneck must be positive, got {bottleneck!r}")
+        if patch_variant == "low_rank" and int(bottleneck) % int(num_heads) != 0:
+            raise ValueError(
+                "low_rank adapter bottleneck must be divisible by the number of heads; "
+                f"got bottleneck={bottleneck}, num_heads={num_heads}"
+            )
         if patch_variant != "output_dropout" and float(patch_output_dropout) != 0.0:
             raise ValueError(
                 "patch_output_dropout is only valid with patch_variant='output_dropout'"
             )
-        if patch_variant != "full" and not use_patch_mixer:
-            raise ValueError("A non-full patch_variant requires use_patch_mixer=True")
+        # The variant applies to whichever native axis branch is enabled.
+        # In particular, low_rank is also the channel-branch variant for a
+        # channel-only adapter, so it must not be rejected merely because the
+        # patch branch is disabled.
+        if patch_variant != "full" and not (use_channel_mixer or use_patch_mixer):
+            raise ValueError("A non-full adapter variant requires an enabled native-axis mixer")
         self.patch_variant = patch_variant
         self.patch_output_dropout_p = float(patch_output_dropout)
         self.depth_dim = int(depth_dim)
@@ -322,8 +335,15 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
 
         if use_channel_mixer:
             self.channel_norm = nn.LayerNorm(dim)
-            self.channel_attn = nn.MultiheadAttention(
-                embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
+            if patch_variant == "low_rank":
+                self.channel_down = nn.Linear(dim, int(bottleneck))
+                self.channel_attn = nn.MultiheadAttention(
+                    embed_dim=int(bottleneck), num_heads=num_heads,
+                    dropout=dropout, batch_first=True)
+                self.channel_up = nn.Linear(int(bottleneck), dim)
+            else:
+                self.channel_attn = nn.MultiheadAttention(
+                    embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
             self.alpha_channel = nn.Parameter(torch.tensor(float(init_alpha)))
 
         if use_patch_mixer:
@@ -332,6 +352,13 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
                 self.patch_attn = nn.MultiheadAttention(
                     embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
                 self.patch_output_dropout = nn.Dropout(p=float(patch_output_dropout))
+            elif patch_variant == "low_rank":
+                self.patch_norm = nn.LayerNorm(dim)
+                self.patch_down = nn.Linear(dim, int(bottleneck))
+                self.patch_attn = nn.MultiheadAttention(
+                    embed_dim=int(bottleneck), num_heads=num_heads,
+                    dropout=dropout, batch_first=True)
+                self.patch_up = nn.Linear(int(bottleneck), dim)
             else:
                 self.singleton_patch_residual = nn.Sequential(
                     nn.LayerNorm(dim),
@@ -385,7 +412,11 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         if hasattr(self, "channel_attn"):
             xc = x.permute(0, 2, 1, 3).reshape(batch_size * patches, channels, dim)
             xc = self.channel_norm(xc)
+            if self.patch_variant == "low_rank":
+                xc = self.channel_down(xc)
             yc, _ = self.channel_attn(xc, xc, xc, need_weights=False)
+            if self.patch_variant == "low_rank":
+                yc = self.channel_up(yc)
             yc = yc.reshape(batch_size, patches, channels, dim).permute(0, 2, 1, 3)
             self._last_raw_channel_ratio = float(
                 yc.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
@@ -395,8 +426,13 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         if hasattr(self, "patch_attn"):
             xp = x.reshape(batch_size * channels, patches, dim)
             xp = self.patch_norm(xp)
+            if self.patch_variant == "low_rank":
+                xp = self.patch_down(xp)
             yp, _ = self.patch_attn(xp, xp, xp, need_weights=False)
-            yp = self.patch_output_dropout(yp)
+            if self.patch_variant == "low_rank":
+                yp = self.patch_up(yp)
+            else:
+                yp = self.patch_output_dropout(yp)
             yp = yp.reshape(batch_size, channels, patches, dim)
             self._last_raw_patch_ratio = float(
                 yp.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
@@ -422,6 +458,63 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             delta = delta * gate
 
         return delta
+
+
+class LoRALinear(nn.Module):
+    """A faithful LoRA wrapper with a frozen base Linear layer."""
+
+    def __init__(self, base, rank=8, alpha=16.0, dropout=0.0):
+        super().__init__()
+        if not isinstance(base, nn.Linear):
+            raise TypeError(f"LoRALinear requires nn.Linear, got {type(base).__name__}")
+        if int(rank) <= 0:
+            raise ValueError(f"LoRA rank must be positive, got {rank!r}")
+        self.base = base
+        for parameter in self.base.parameters():
+            parameter.requires_grad_(False)
+        self.rank = int(rank)
+        self.alpha = float(alpha)
+        self.scaling = self.alpha / self.rank
+        self.dropout = nn.Dropout(float(dropout))
+        self.lora_A = nn.Parameter(torch.empty(self.rank, base.in_features))
+        self.lora_B = nn.Parameter(torch.zeros(base.out_features, self.rank))
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+
+    @property
+    def weight(self):
+        return self.base.weight
+
+    @property
+    def bias(self):
+        return self.base.bias
+
+    def forward(self, x):
+        base = self.base(x)
+        update = F.linear(self.dropout(x), self.lora_A)
+        update = F.linear(update, self.lora_B) * self.scaling
+        return base + update
+
+
+def inject_lora(model, rank=8, alpha=16.0, dropout=0.0, target="qkv"):
+    """Replace selected LaBraM attention projections with independent LoRA."""
+    targets = {item.strip() for item in str(target).split(',') if item.strip()}
+    valid = {"qkv", "proj"}
+    if not targets or not targets.issubset(valid):
+        raise ValueError(f"LoRA target must contain only qkv and/or proj, got {target!r}")
+    replaced = []
+    for module_name, module in list(model.named_modules()):
+        if module_name == "" or module_name.rsplit('.', 1)[-1] not in targets:
+            continue
+        parent_name, child_name = module_name.rsplit('.', 1)
+        parent = model.get_submodule(parent_name)
+        if not isinstance(module, nn.Linear):
+            raise TypeError(f"LoRA target {module_name} is {type(module).__name__}, not Linear")
+        setattr(parent, child_name, LoRALinear(module, rank=rank, alpha=alpha, dropout=dropout))
+        replaced.append(module_name)
+    if not replaced:
+        raise RuntimeError(f"No LoRA target modules found for target={target!r}")
+    print(f"[LaBraM LoRA] injected rank={rank} alpha={alpha} target={target}: {replaced}", flush=True)
+    return replaced
 
 
 class NeuralTransformer(nn.Module):
@@ -492,9 +585,9 @@ class NeuralTransformer(nn.Module):
             )
 
         adapter_type = str(adapter_type).strip().lower()
-        if adapter_type not in {"none", "channel", "patch", "channel_patch"}:
+        if adapter_type not in {"none", "generic", "channel", "patch", "channel_patch"}:
             raise ValueError(
-                "adapter_type must be one of: none, channel, patch, channel_patch; "
+                "adapter_type must be one of: none, generic, channel, patch, channel_patch; "
                 f"got {adapter_type!r}"
             )
         adapter_depth_mode = str(adapter_depth_mode).strip().lower()
@@ -502,9 +595,9 @@ class NeuralTransformer(nn.Module):
             raise ValueError("adapter_depth_mode must be 'none' or 'lastk_delta'")
         self.adapter_type = adapter_type
         self.adapter_variant = str(adapter_variant).strip().lower()
-        if self.adapter_variant not in {"full", "output_dropout", "bottleneck"}:
+        if self.adapter_variant not in {"full", "output_dropout", "bottleneck", "low_rank"}:
             raise ValueError(
-                "adapter_variant must be one of: full, output_dropout, bottleneck; "
+                "adapter_variant must be one of: full, output_dropout, bottleneck, low_rank; "
                 f"got {adapter_variant!r}"
             )
         self.adapter_patch_output_dropout = float(adapter_patch_output_dropout)
@@ -558,7 +651,9 @@ class NeuralTransformer(nn.Module):
                     init_alpha=adapter_init_alpha,
                     use_channel_mixer=self.adapter_type in {"channel", "channel_patch"},
                     use_patch_mixer=self.adapter_type in {"patch", "channel_patch"},
-                    use_token_mlp=adapter_use_token_mlp,
+                    # generic is an axis-blind token-wise residual control;
+                    # it is deliberately not combined with native mixers.
+                    use_token_mlp=adapter_use_token_mlp or self.adapter_type == "generic",
                     depth_dim=embed_dim if self.adapter_depth_mode != "none" else 0,
                     patch_variant=self.adapter_variant,
                     patch_output_dropout=self.adapter_patch_output_dropout,
@@ -584,7 +679,7 @@ class NeuralTransformer(nn.Module):
                 f"type={self.adapter_type} gamma={self.adapter_gamma} "
                 f"variant={self.adapter_variant} patch_output_dropout={self.adapter_patch_output_dropout} "
                 f"bottleneck={adapter_bottleneck} "
-                f"token_mlp={bool(adapter_use_token_mlp)} "
+                f"token_mlp={bool(adapter_use_token_mlp or self.adapter_type == 'generic')} "
                 f"depth_mode={self.adapter_depth_mode} depth_k={self.adapter_depth_k} "
                 f"fixed_alpha={self.adapter_fixed_alpha} "
                 f"{' '.join(alpha_info)}",

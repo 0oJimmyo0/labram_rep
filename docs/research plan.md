@@ -1,4 +1,9 @@
-# LaBraM Structured Adapter Research Plan
+# Historical LaBraM Structured-Adapter Plan
+
+> **Superseded on 2026-07-23.** The canonical current plan is
+> [`cross_backbone_execution_plan.md`](cross_backbone_execution_plan.md).
+> This file is retained as historical pilot planning and evidence. It must not
+> be used as the source of truth for the revised cross-backbone paper.
 
 ## Objective
 
