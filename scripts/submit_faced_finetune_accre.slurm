@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --time=12:00:00
+#SBATCH --time=03:00:00
 #SBATCH --output=/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM/logs/out/%x/%j.out
 #SBATCH --error=/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM/logs/err/%x/%j.err
 
@@ -43,6 +43,18 @@ LABRAM_ADAPTER_USE_TOKEN_MLP="${LABRAM_ADAPTER_USE_TOKEN_MLP:-0}"
 LABRAM_ADAPTER_DEPTH_MODE="${LABRAM_ADAPTER_DEPTH_MODE:-none}"
 LABRAM_ADAPTER_DEPTH_K="${LABRAM_ADAPTER_DEPTH_K:-4}"
 LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH="${LABRAM_ADAPTER_GAMMA_ZERO_SKIP_BRANCH:-0}"
+LABRAM_BACKBONE_MODE="${LABRAM_BACKBONE_MODE:-trainable}"
+LABRAM_UPPER_K="${LABRAM_UPPER_K:-2}"
+LABRAM_LORA_RANK="${LABRAM_LORA_RANK:-8}"
+LABRAM_LORA_ALPHA="${LABRAM_LORA_ALPHA:-16.0}"
+LABRAM_LORA_DROPOUT="${LABRAM_LORA_DROPOUT:-0.0}"
+LABRAM_LORA_TARGET="${LABRAM_LORA_TARGET:-qkv}"
+BACKBONE_LR_SCALE="${BACKBONE_LR_SCALE:-1.0}"
+HEAD_LR_SCALE="${HEAD_LR_SCALE:-1.0}"
+HEAD_WEIGHT_DECAY="${HEAD_WEIGHT_DECAY:-}"
+INPUT_SCALE_DIVISOR="${INPUT_SCALE_DIVISOR:-1.0}"
+SMOOTHING="${SMOOTHING:-0.1}"
+STRICT_CHECKPOINT_LOAD="${STRICT_CHECKPOINT_LOAD:-1}"
 SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-0}"
 FINETUNE_CHECKPOINT="${FINETUNE_CHECKPOINT:-./checkpoints/labram-base.pth}"
 EVAL_VALIDATION_ONLY="${EVAL_VALIDATION_ONLY:-0}"
@@ -112,6 +124,12 @@ if [[ "$DETERMINISTIC" == "1" ]]; then
   export CUBLAS_WORKSPACE_CONFIG=":4096:8"
   PYTHON_ARGS+=(--deterministic)
 fi
+if [[ "$STRICT_CHECKPOINT_LOAD" == "1" ]]; then
+  PYTHON_ARGS+=(--strict_checkpoint_load)
+fi
+if [[ -n "$HEAD_WEIGHT_DECAY" ]]; then
+  PYTHON_ARGS+=(--head_weight_decay "$HEAD_WEIGHT_DECAY")
+fi
 
 OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_NODE" run_class_finetuning.py \
   --output_dir "$OUTPUT_DIR" \
@@ -128,6 +146,16 @@ OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC_PER_
   --epochs "$EPOCHS" \
   --layer_decay "$LAYER_DECAY" \
   --drop_path "$DROP_PATH" \
+  --backbone_lr_scale "$BACKBONE_LR_SCALE" \
+  --head_lr_scale "$HEAD_LR_SCALE" \
+  --labram_backbone_mode "$LABRAM_BACKBONE_MODE" \
+  --labram_upper_k "$LABRAM_UPPER_K" \
+  --labram_lora_rank "$LABRAM_LORA_RANK" \
+  --labram_lora_alpha "$LABRAM_LORA_ALPHA" \
+  --labram_lora_dropout "$LABRAM_LORA_DROPOUT" \
+  --labram_lora_target "$LABRAM_LORA_TARGET" \
+  --input_scale_divisor "$INPUT_SCALE_DIVISOR" \
+  --smoothing "$SMOOTHING" \
   --labram_adapter_type "$LABRAM_ADAPTER_TYPE" \
   --labram_adapter_bottleneck "$LABRAM_ADAPTER_BOTTLENECK" \
   --labram_adapter_heads "$LABRAM_ADAPTER_HEADS" \

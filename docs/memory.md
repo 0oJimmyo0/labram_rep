@@ -970,3 +970,169 @@ Observed ISRUC 30-epoch jobs take roughly 45--60 minutes on one A6000. The
 ISRUC dense, native, and patch launchers now request `03:00:00`, leaving a
 substantial safety margin while improving queue priority. Keep 12 hours only
 for datasets or jobs whose measured runtime justifies it.
+
+### ISRUC final confirmation packet queued (2026-07-24)
+
+The bounded final-test packet is submitted without opening a new LR or adaptor
+sweep. Raw-scale dense is the current adaptor-comparison contract; the `/100`
+seed-42 result remains a scaling sensitivity and does not resolve the published
+baseline discrepancy.
+
+```text
+raw dense completion:       12763552 (seed 1024), 12763558 (seed 3407)
+dense backbone-LR=0.1:      12763559 (seed 42), 12763554 (seed 1024),
+                             12763553 (seed 3407)
+channel adaptor LR=0.1:     12763555 (seed 42), 12763556 (seed 1024),
+                             12763557 (seed 3407)
+```
+
+All eight ISRUC final-test conditions use batch 16, 30 epochs, LR `2e-4`,
+validation-kappa selection, and the same checkpoint/split. The channel packet
+uses backbone LR scale `0.1`, channel core LR scale `1`, alpha LR scale `0.5`,
+and alpha initialization `0.01`. The purpose is to establish the paired
+dense-versus-channel performance/stability trade-off, not to search for a new
+best setting. ISRUC can be frozen after these jobs are inspected and the
+required metrics and trajectories are recorded.
+
+### Redundancy audit and checkpoint-only evaluation (2026-07-24)
+
+An inventory of all ISRUC checkpoint directories showed that the raw dense
+seeds 1024/3407 and dense backbone-LR-0.1 seed 42 already had complete
+30-epoch trajectories and selected checkpoints. The queued retraining packet
+was therefore canceled; no channel multiseed expansion was promoted because
+the seed-42 channel pilot did not show a clear advantage over the matched
+LR-0.1 dense validation trajectory.
+
+Only checkpoint-only test evaluation remains:
+
+```text
+12763603 -> isruc_labram_dense_lr2e-4_s3407_b16_e30_scale1
+12763604 -> isruc_dense_bls0.1_lr2e-4_s42_b16_e30
+12763605 -> isruc_labram_dense_lr2e-4_s1024_b16_e30_scale1
+```
+
+These jobs evaluate existing `checkpoint-best.pth` and `checkpoint-best-ba.pth`
+without retraining and write `final_test.json` into the existing run
+directories. After those artifacts are inspected, no further ISRUC training is
+required unless a paper claim explicitly requires the optional frozen rank-32
+matched comparison.
+
+### Latest checkpoint-only audit correction (2026-07-24)
+
+The three original checkpoint-only jobs all succeeded with strict checkpoint
+loading and complete `final_test.json` artifacts:
+
+```text
+raw dense, seed 42:    Acc 0.814598, BA 0.799651, kappa 0.758339, F1 0.808894
+raw dense, seed 1024: Acc 0.814828, BA 0.793913, kappa 0.758131, F1 0.810832
+raw dense, seed 3407: Acc 0.808851, BA 0.793211, kappa 0.750923, F1 0.804034
+dense LR 0.1, seed42: Acc 0.821149, BA 0.799549, kappa 0.766433, F1 0.817872
+```
+
+The raw dense three-seed primary-test summary is BA `0.795592 ± 0.003533`,
+kappa `0.755798 ± 0.004223`, weighted F1 `0.807920 ± 0.003502`, and
+accuracy `0.812759 ± 0.003386` (sample standard deviation).
+
+Frozen dense seed 42 also completed successfully: Acc `0.685977`, BA
+`0.609793`, kappa `0.577020`, and weighted F1 `0.648440`. Both selected
+checkpoints produced identical test metrics, and the strict load report
+passed. This is a valid low frozen-head result, not a failed job.
+
+The remaining exact-test gap is the frozen dense and frozen full-width patch
+three-seed packet. Corrected evaluations are queued as jobs `12763665`,
+`12763666`, `12763667`, and `12763668`; they use existing checkpoints and do
+not retrain. Job `12763661` failed only because its submitted directory name
+did not exist and must be excluded from scientific summaries. After the four
+corrected jobs finish, ISRUC has no remaining required training or multiseed
+task. Frozen rank-32 aligned versus frozen dense remains optional only if the
+paper claims a parameter-matched common primitive.
+
+Queue correction: the missing frozen-patch seed-42 evaluation is job
+`12763670`. Therefore the complete frozen dense/patch test matrix is covered
+by completed job `12763658` (frozen dense seed 42) plus queued jobs
+`12763665`, `12763666`, `12763667`, `12763668`, and `12763670`.
+
+### ISRUC frozen matrix completed and cross-dataset closure packet (2026-07-24)
+
+All six frozen ISRUC evaluations completed successfully with strict loading.
+Primary test metrics are:
+
+```text
+seed       frozen dense (Acc / BA / kappa / F1)       frozen patch (Acc / BA / kappa / F1)
+42         .685977 / .609793 / .577020 / .648440     .756092 / .721961 / .680816 / .744376
+1024       .686092 / .608313 / .576279 / .647667     .762069 / .728435 / .688496 / .749551
+3407       .682299 / .605116 / .572168 / .643313     .759080 / .725039 / .684772 / .747060
+mean       .684789 / .607741 / .575156 / .646473     .759080 / .725145 / .684695 / .746995
+```
+
+The paired frozen-patch BA gains over frozen dense are `+0.112168`,
+`+0.120122`, and `+0.119923` for seeds 42, 1024, and 3407, respectively;
+mean gain is `+0.117404`. This closes ISRUC. No further ISRUC training,
+channel multiseed promotion, or LR sweep is required. The rank-32 aligned
+comparison remains optional only for a parameter-matched claim.
+
+To keep the three LaBraM datasets comparable, the following missing reviewer
+control cells are now queued with fixed seeds `{42,1024,3407}`, validation-
+kappa selection, final test evaluation, and strict checkpoint loading:
+
+```text
+FACED:  frozen dense, frozen patch, frozen generic, LoRA qkv-r8, upper-2
+       jobs 12763810-12763822, 12763824, 12763826 (15 jobs)
+SEED-V: frozen generic, LoRA qkv-r8, upper-2
+       jobs 12763823, 12763825, 12763827-12763833 (9 jobs)
+```
+
+FACED keeps its validated batch-32/LR-7e-4/80-epoch recipe; SEED-V keeps its
+validated `/100`, batch-16/LR-3e-4/40-epoch recipe. These are comparator
+controls, not new architecture tuning. Existing native-axis cells are not
+duplicated: FACED patch and SEED-V frozen channel are already multiseed;
+SEED-V frozen patch remains a singleton-axis capacity control.
+
+### SEED-V control-packet launcher repair (2026-07-25)
+
+The first SEED-V generic/LoRA/upper packet (`12763823`, `12763825`, and
+`12763827-12763833`) failed during launcher validation before training. This
+was procedural: the launcher rejected `upper_k`/`lora` modes and required a
+literal `BACKBONE_LR_SCALE=0.0`; no scientific output was produced.
+
+The launcher now accepts all four intended backbone modes, validates frozen LR
+scales numerically, enables strict checkpoint reporting, and requests a
+03:00:00 wall time. The unchanged nine-cell packet was resubmitted as jobs
+`12763934-12763942` with the same seeds, recipe, and final-test requirement.
+
+### SEED-V TMLR closure checklist (active 2026-07-25)
+
+Completed before the corrected control packet:
+
+- full structural LMDB audit: 117744 finite records, shape `(62,1,200)`,
+  labels `[0,4]`, disjoint split keys and sample content, and documented
+  within-subject trial split `0-4/5-9/10-14`;
+- channel-axis geometry diagnostic: 62-channel attention has active Q/K/V
+  gradients, while the one-patch temporal branch has no patch-to-patch
+  interaction;
+- frozen dense, frozen channel, and frozen patch on `{42,1024,3407}` with
+  final test evaluation;
+- trainable dense and channel confirmation packet on `{42,1024,3407}`;
+- final test diagnostics, train/validation trajectories, parameter counts,
+  residual ratios, and channel Q/K/V/update norms for the native cells.
+
+Still required for the SEED-V control section:
+
+- corrected frozen generic, LoRA qkv-r8, and upper-2 controls on all three
+  seeds, jobs `12763934-12763942`;
+- report their full trajectories and final Acc/BA/kappa/F1 beside the native
+  cells;
+- preserve the channel-order qualification: the source montage files match,
+  but the legacy LMDB does not encode direct row-to-electrode linkage because
+  the original CNT inputs are unavailable. This must be stated explicitly in
+  the paper unless the raw preprocessing artifacts are recovered.
+
+No SEED-V depth sweep, channel+patch primary result, or additional LR sweep
+is required. Depth is not a meaningful temporal-patch claim when `S=1`, and
+patch remains only a singleton-axis capacity control.
+
+The initial FACED comparator packet was not valid: jobs `12763810-12763822`,
+`12763824`, and `12763826` reached model initialization but stopped at epoch
+0 with NaN loss under the attempted frozen/generic/LoRA/upper recipe. They
+were failed/excluded from scientific summaries. FACED is not being rerun
+while SEED-V is active; its controls require a separate NaN-preflight repair.

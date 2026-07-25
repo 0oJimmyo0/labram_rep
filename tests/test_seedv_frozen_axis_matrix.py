@@ -8,6 +8,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from modeling_finetune import NeuralTransformer
+import modeling_finetune
 from run_class_finetuning import (
     assert_optimizer_matches_trainability,
     configure_labram_trainability,
@@ -59,6 +60,27 @@ def test_seedv_frozen_trainability_and_optimizer_membership():
         assert_optimizer_matches_trainability(model, optimizer)
         del optimizer, model
         gc.collect()
+
+
+def test_seedv_lora_is_separate_from_native_adapter():
+    model = build_model("none")
+    modeling_finetune.inject_lora(model, rank=8, alpha=16.0, dropout=0.0, target="qkv")
+    summary = configure_labram_trainability(model, "lora")
+    trainable = {
+        name for name, parameter in model.named_parameters() if parameter.requires_grad
+    }
+    assert summary["backbone"]["trainable"] == 0
+    assert summary["head"]["trainable"] > 0
+    assert summary["adapter"]["trainable"] == 0
+    assert summary["lora"]["trainable"] > 0
+    assert any(".lora_A" in name or ".lora_B" in name for name in trainable)
+    optimizer = torch.optim.AdamW(
+        [parameter for parameter in model.parameters() if parameter.requires_grad],
+        lr=1e-3,
+    )
+    assert_optimizer_matches_trainability(model, optimizer)
+    del optimizer, model
+    gc.collect()
 
 
 def test_seedv_channel_only_wiring():
@@ -117,6 +139,7 @@ def test_frozen_backbone_eval_mode_is_deterministic_but_head_is_trainable():
 
 def main():
     test_seedv_frozen_trainability_and_optimizer_membership()
+    test_seedv_lora_is_separate_from_native_adapter()
     test_seedv_channel_only_wiring()
     test_seedv_patch_is_singleton_capacity_control()
     print("SEED-V frozen axis matrix: PASS")

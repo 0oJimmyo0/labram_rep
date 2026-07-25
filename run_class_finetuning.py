@@ -38,7 +38,12 @@ import modeling_finetune
 
 
 def configure_labram_trainability(model, backbone_mode, upper_k=2):
-    """Configure and summarize LaBraM backbone/head/adapter trainability."""
+    """Configure and summarize native-adapter, LoRA, head, and backbone trainability.
+
+    LoRA is an independent generic PEFT control.  Keep its parameters separate
+    from ``native_axis_adapter`` so mode validation cannot mistake a valid LoRA
+    run for a native-adapter run.
+    """
     if backbone_mode not in {"trainable", "frozen", "upper_k", "lora"}:
         raise ValueError(f"Unsupported backbone_mode={backbone_mode!r}")
     if backbone_mode == "upper_k":
@@ -50,18 +55,23 @@ def configure_labram_trainability(model, backbone_mode, upper_k=2):
         "backbone": {"total": 0, "trainable": 0},
         "head": {"total": 0, "trainable": 0},
         "adapter": {"total": 0, "trainable": 0},
+        "lora": {"total": 0, "trainable": 0},
     }
     for name, parameter in model.named_parameters():
-        if name.startswith("native_axis_adapter.") or ".lora_A" in name or ".lora_B" in name:
+        if name.startswith("native_axis_adapter."):
             component = "adapter"
+        elif ".lora_A" in name or ".lora_B" in name:
+            component = "lora"
         elif name.startswith("head."):
             component = "head"
         else:
             component = "backbone"
         if backbone_mode == "trainable":
             should_train = True
-        elif backbone_mode in {"frozen", "lora"}:
+        elif backbone_mode == "frozen":
             should_train = component in {"head", "adapter"}
+        elif backbone_mode == "lora":
+            should_train = component in {"head", "lora"}
         else:
             block_index = None
             if name.startswith("blocks."):
@@ -84,6 +94,13 @@ def configure_labram_trainability(model, backbone_mode, upper_k=2):
             raise RuntimeError("Frozen-backbone mode left trainable backbone parameters.")
         if summary["head"]["trainable"] == 0:
             raise RuntimeError("Frozen-backbone mode accidentally froze the classifier head.")
+    if backbone_mode == "frozen" and summary["lora"]["trainable"] != 0:
+        raise RuntimeError("Native frozen-adapter mode unexpectedly left LoRA parameters trainable.")
+    if backbone_mode == "lora":
+        if summary["lora"]["trainable"] == 0:
+            raise RuntimeError("LoRA mode did not leave any LoRA parameters trainable.")
+        if summary["adapter"]["trainable"] != 0:
+            raise RuntimeError("LoRA mode unexpectedly left native adapter parameters trainable.")
     return summary
 
 
@@ -293,6 +310,8 @@ def get_args():
                         help='start epoch')
     parser.add_argument('--eval', action='store_true',
                         help='Perform evaluation only')
+    parser.add_argument('--eval_selected_checkpoints', action='store_true',
+                        help='Evaluate checkpoint-best.pth and checkpoint-best-ba.pth in an existing output directory without retraining.')
     parser.add_argument('--eval_validation_only', action='store_true', default=False,
                         help='Evaluate the validation split only, without test evaluation or training.')
     parser.add_argument('--dist_eval', action='store_true', default=False,
@@ -732,12 +751,17 @@ def main(args, ds_init):
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     adapter_parameter_count = sum(
         p.numel() for name, p in model_without_ddp.named_parameters()
-        if name.startswith('native_axis_adapter.') or '.lora_A' in name or '.lora_B' in name
+        if name.startswith('native_axis_adapter.')
+    )
+    lora_parameter_count = sum(
+        p.numel() for name, p in model_without_ddp.named_parameters()
+        if '.lora_A' in name or '.lora_B' in name
     )
 
     print("Model = %s" % str(model_without_ddp))
     print('number of params:', n_parameters)
     print('adapter params:', adapter_parameter_count)
+    print('lora params:', lora_parameter_count)
 
     total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
     num_training_steps_per_epoch = len(dataset_train) // total_batch_size
@@ -899,6 +923,7 @@ def main(args, ds_init):
         'trainable_backbone_parameters': int(trainability_summary['backbone']['trainable']),
         'trainable_head_parameters': int(trainability_summary['head']['trainable']),
         'trainable_adapter_parameters': int(trainability_summary['adapter']['trainable']),
+        'trainable_lora_parameters': int(trainability_summary['lora']['trainable']),
         'smoothing': float(args.smoothing),
         'drop_path': float(args.drop_path),
         'drop': float(args.drop),
@@ -919,6 +944,7 @@ def main(args, ds_init):
         'adapter_gamma': float(args.labram_adapter_gamma),
         'adapter_init_alpha': float(args.labram_adapter_init_alpha),
         'adapter_parameter_count': int(adapter_parameter_count),
+        'lora_parameter_count': int(lora_parameter_count),
         'adapter_lr_scale': float(args.labram_adapter_lr_scale),
         'adapter_core_lr_scale': float(args.labram_adapter_lr_scale),
         'adapter_alpha_lr_scale': float(
@@ -946,7 +972,7 @@ def main(args, ds_init):
         'output_dir': os.path.abspath(args.output_dir) if args.output_dir else '',
     }
     print('Run contract: ' + json.dumps(run_config, sort_keys=True), flush=True)
-    if args.output_dir and utils.is_main_process():
+    if args.output_dir and utils.is_main_process() and not args.eval_selected_checkpoints:
         with open(os.path.join(args.output_dir, 'run_config.json'), 'w', encoding='utf-8') as f:
             json.dump(run_config, f, indent=2)
 
@@ -962,6 +988,74 @@ def main(args, ds_init):
     utils.auto_load_model(
         args=args, model=model, model_without_ddp=model_without_ddp,
         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
+
+    if args.eval_selected_checkpoints:
+        if data_loader_test is None or data_loader_val is None:
+            raise ValueError('Selected-checkpoint evaluation requires validation and test dataloaders.')
+
+        eval_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
+
+        def _mean_eval_stat(stats_list, key):
+            values = [item[key] for item in stats_list if key in item]
+            if not values:
+                raise KeyError(f'Missing evaluation statistic: {key}')
+            first = values[0]
+            if isinstance(first, (list, tuple, np.ndarray)):
+                return np.asarray(values, dtype=np.float64).mean(axis=0).tolist()
+            return float(np.mean(values))
+
+        def _eval_scalar(stats, primary, fallback=None):
+            if primary in stats and stats[primary] is not None:
+                return float(stats[primary])
+            if fallback is not None and fallback in stats and stats[fallback] is not None:
+                return float(stats[fallback])
+            return float('nan')
+
+        selected = {}
+        for filename, label, validation_metric in (
+            ('checkpoint-best.pth', 'primary_test', 'cohen_kappa'),
+            ('checkpoint-best-ba.pth', 'sensitivity_test', 'balanced_accuracy'),
+        ):
+            checkpoint_path = os.path.join(args.output_dir, filename)
+            if not os.path.isfile(checkpoint_path):
+                raise FileNotFoundError(f'Selected checkpoint not found: {checkpoint_path}')
+            checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+            model_without_ddp.load_state_dict(checkpoint['model'])
+            stats_list = [
+                evaluate(
+                    loader, model, device, header=f'{label}:', ch_names=ch_names,
+                    metrics=metrics, is_binary=args.nb_classes == 1,
+                    input_scale_divisor=args.input_scale_divisor,
+                )
+                for loader in eval_loaders
+            ]
+            selected[label] = {
+                key: _mean_eval_stat(stats_list, key)
+                for key in stats_list[0]
+            }
+            selected[label]['checkpoint'] = filename
+            selected[label]['validation_metric'] = validation_metric
+            print(
+                f'Checkpoint-only {label} ({filename}): '
+                f"accuracy={_eval_scalar(selected[label], 'accuracy'):.5f}, "
+                f"balanced_accuracy={_eval_scalar(selected[label], 'balanced_accuracy', 'accuracy'):.5f}, "
+                f"cohen_kappa={_eval_scalar(selected[label], 'cohen_kappa'):.5f}, "
+                f"f1_weighted={_eval_scalar(selected[label], 'f1_weighted'):.5f}",
+                flush=True,
+            )
+        if args.output_dir and utils.is_main_process():
+            with open(os.path.join(args.output_dir, 'final_test.json'), 'w', encoding='utf-8') as f:
+                json.dump({
+                    'selection_metric': 'cohen_kappa',
+                    'primary_checkpoint': 'checkpoint-best.pth',
+                    'primary_validation_metric': 'cohen_kappa',
+                    'primary_test': selected['primary_test'],
+                    'sensitivity_checkpoint': 'checkpoint-best-ba.pth',
+                    'sensitivity_validation_metric': 'balanced_accuracy',
+                    'sensitivity_test': selected['sensitivity_test'],
+                    'evaluation_only': True,
+                }, f, indent=2)
+        exit(0)
             
     if args.eval:
         if data_loader_test is None:
