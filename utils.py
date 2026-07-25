@@ -584,6 +584,17 @@ def load_state_dict(model, state_dict, prefix='', ignore_missing="relative_posit
     if len(error_msgs) > 0:
         print('\n'.join(error_msgs))
 
+    # Keep the loader's diagnostics machine-readable.  The original LaBraM
+    # helper only printed these lists, which made it difficult to distinguish
+    # an intentional task-head mismatch from an accidentally partial backbone
+    # load in a completed Slurm job.
+    return {
+        'missing_keys': list(missing_keys),
+        'ignored_missing_keys': list(ignore_missing_keys),
+        'unexpected_keys': list(unexpected_keys),
+        'error_messages': list(error_msgs),
+    }
+
 def get_grad_norm(parameters, norm_type=2):
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]

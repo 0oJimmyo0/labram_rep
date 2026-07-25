@@ -48,7 +48,9 @@ def _snapshot_update_parameters(model):
     for name, parameter in core_model.named_parameters():
         if not parameter.requires_grad:
             continue
-        if name.startswith('native_axis_adapter.alpha_'):
+        if '.lora_A' in name or '.lora_B' in name:
+            category = 'lora'
+        elif name.startswith('native_axis_adapter.alpha_'):
             category = 'alpha'
         elif name.startswith('native_axis_adapter.'):
             category = 'adapter_core'
@@ -67,7 +69,7 @@ def _parameter_update_norms(model, snapshot):
     current = dict(core_model.named_parameters())
     stats = {
         category: {'update_sq': 0.0, 'parameter_sq': 0.0}
-        for category in ('adapter_core', 'alpha', 'last_block', 'classifier')
+        for category in ('adapter_core', 'alpha', 'lora', 'last_block', 'classifier')
     }
     for name, (before, category) in snapshot.items():
         if name not in current:

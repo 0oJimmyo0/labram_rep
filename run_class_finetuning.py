@@ -320,6 +320,8 @@ def get_args():
                         help='validated SEED-V channel manifest JSON path')
     parser.add_argument('--input_scale_divisor', default=100.0, type=float,
                         help='Divide stored SEED-V/FACED samples by this value before LaBraM. Use 1 to preserve raw scale.')
+    parser.add_argument('--strict_checkpoint_load', action='store_true', default=False,
+                        help='Fail if checkpoint loading has missing/unexpected keys outside the documented task-head/adapter allowlist.')
 
     known_args, _ = parser.parse_known_args()
 
@@ -640,7 +642,57 @@ def main(args, ds_init):
                 remapped[wrapped_key if wrapped_key in model_keys else key] = value
             checkpoint_model = remapped
 
-        utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+        checkpoint_load_report = utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+
+        # These are the only intentionally absent keys for the ISRUC LaBraM
+        # fine-tuning contract: the downstream pooling/head/sequence module,
+        # plus freshly initialized PEFT/native-adapter parameters.  A missing
+        # encoder block or projection is a hard failure when strict loading is
+        # requested.
+        allowed_missing_prefixes = ('fc_norm.', 'head.', 'sequence_encoder.')
+        if args.labram_backbone_mode == 'lora':
+            allowed_missing_prefixes += ('.lora_A', '.lora_B')
+        if args.labram_adapter_type != 'none':
+            allowed_missing_prefixes += ('native_axis_adapter.',)
+        allowed_unexpected_keys = {
+            'mask_token', 'lm_head.weight', 'lm_head.bias', 'norm.weight', 'norm.bias',
+        }
+        missing_violations = [
+            key for key in checkpoint_load_report['missing_keys']
+            if not any(key.startswith(prefix) or prefix in key for prefix in allowed_missing_prefixes)
+        ]
+        unexpected_violations = [
+            key for key in checkpoint_load_report['unexpected_keys']
+            if key not in allowed_unexpected_keys
+        ]
+        checkpoint_load_report.update({
+            'checkpoint_path': os.path.abspath(args.finetune) if args.finetune else '',
+            'checkpoint_key_count': int(len(checkpoint_model)),
+            'model_key_count': int(len(model.state_dict())),
+            'allowed_missing_prefixes': list(allowed_missing_prefixes),
+            'allowed_unexpected_keys': sorted(allowed_unexpected_keys),
+            'missing_key_violations': missing_violations,
+            'unexpected_key_violations': unexpected_violations,
+            'strict': bool(args.strict_checkpoint_load),
+            'strict_pass': not missing_violations and not unexpected_violations and not checkpoint_load_report['error_messages'],
+        })
+        print('Checkpoint load report: ' + json.dumps(checkpoint_load_report, sort_keys=True), flush=True)
+        if args.strict_checkpoint_load and not checkpoint_load_report['strict_pass']:
+            raise RuntimeError(
+                'Strict checkpoint load failed: '
+                + json.dumps({
+                    'missing_key_violations': missing_violations,
+                    'unexpected_key_violations': unexpected_violations,
+                    'error_messages': checkpoint_load_report['error_messages'],
+                }, sort_keys=True)
+            )
+    else:
+        checkpoint_load_report = {
+            'checkpoint_path': '',
+            'strict': bool(args.strict_checkpoint_load),
+            'strict_pass': True,
+            'note': 'No pretrained checkpoint supplied.',
+        }
 
     trainability_summary = configure_labram_trainability(
         model,
@@ -812,6 +864,8 @@ def main(args, ds_init):
         'dataset': str(args.dataset),
         'data_path': os.path.abspath(args.data_path) if args.data_path else '',
         'input_scale_divisor': float(args.input_scale_divisor),
+        'strict_checkpoint_load': bool(args.strict_checkpoint_load),
+        'checkpoint_load_report': checkpoint_load_report,
         'seedv_channel_manifest': os.path.abspath(args.seedv_channel_manifest) if args.seedv_channel_manifest else '',
         'channel_names': ch_names,
         'input_chans': input_chans,

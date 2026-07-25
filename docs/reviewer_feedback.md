@@ -833,3 +833,204 @@ The failure was primarily one of **claim–evidence alignment**:
 
 [1]: https://neurips.cc/Conferences/2026/MainTrackHandbook?utm_source=chatgpt.com "Main Track Handbook 2026"
 [2]: https://neurips.cc/Conferences/2026/ReviewerGuidelines?utm_source=chatgpt.com "2026 Reviewer Guidelines"
+
+---
+
+# Current revised-plan status and TMLR readiness
+
+This section supersedes the earlier “mentor discussion brief” as the current
+execution record. The four reviewer interpretations above are retained: the
+reviewers were correct that the legacy paper over-centered depth routing,
+under-isolated the causal comparison against simple PEFT and upper-layer
+training, and mixed single-run evidence with seed-complete evidence. Their
+unsupported categorical statements about irrelevance, unintelligibility,
+absence of all baseline details, or “LLM-written” work remain rejected and do
+not guide the revised study.
+
+## Current paper identity
+
+The working paper identity is:
+
+> **Interaction-Aligned Adaptation for EEG Foundation Models**
+
+The central claim is deliberately conditional:
+
+> A lightweight residual adapter can be derived from a backbone’s native,
+> non-degenerate interaction axes. Its usefulness depends on the backbone,
+> realized token geometry, dataset, and whether the pretrained backbone is
+> frozen or fully trainable.
+
+This is not a claim that channel/patch adapters universally outperform dense
+fine-tuning. CBraMod must be run only in `EEGxPlore/EEGxPlore`; LaBraM must be
+run only in `LaBraM`. The repositories must never be wired together for a
+paper result. `LaBraM-depth` remains historical and is not a third active
+backbone.
+
+## What the current evidence already says
+
+### LaBraM SEED-V
+
+- The realized LaBraM geometry is `[B,62,1,D]`; channel interaction is
+  eligible, while temporal patch attention is degenerate.
+- Frozen channel adaptation is the correct structure-aware SEED-V result;
+  frozen patch is retained only as a singleton-axis capacity control.
+- The existing within-subject results show that freezing can reduce the
+  early-overfitting failure mode, but a subject-disjoint evaluation is still
+  required before making a cross-subject generalization claim.
+
+### LaBraM ISRUC
+
+The verified ISRUC contract is six bipolar channels, 30 temporal patches per
+epoch, sequence length 20, batch size 16, the CBraMod-matched preprocessing,
+and validation-kappa checkpoint selection.
+
+Completed development evidence:
+
+| Cell | Development status | Primary test BA summary |
+| --- | --- | ---: |
+| Dense full fine-tuning | Seed-42 test anchor complete | `0.7997` |
+| Rank-32 channel, patch, channel+patch, alpha `0.5` | Seeds `42,1024,3407` complete | `0.7924`, `0.7911`, `0.7917` mean |
+| Frozen generic token adapter | Seeds `42,1024,3407` complete | `0.6636 ± 0.0023` |
+| Upper-2 fine-tuning | Seeds `42,1024,3407` complete | `0.7939 ± 0.0053` |
+| LoRA qkv, rank 8 | Seeds 42 and 1024 retry complete; 3407 pending | pending final packet |
+
+The native low-rank adapters are active and connected, but their validation
+peaks occur early and their test means do not exceed the dense anchor. Upper-2
+fine-tuning nearly matches dense performance with a smaller train/validation
+gap. Generic frozen adaptation underfits in its current configuration. The
+responsible conclusion is therefore:
+
+> On ISRUC, native residual adaptation is clearly useful in the frozen-backbone
+> regime, but the current fully trainable low-rank adapter does not improve over
+> dense fine-tuning. This is a conditional result, not evidence that the
+> design rule is universally ineffective.
+
+The earlier frozen ISRUC gain used a full-width frozen patch adapter. It must
+not be silently presented as proof that the final rank-32 common primitive has
+already won a matched frozen comparison.
+
+Current jobs:
+
+- `12760330`: repaired LoRA seed-3407 completion, pending.
+- `12760559`: one bounded channel run with backbone LR scale `0.1`, adaptor
+  LR scale `1.0`, and alpha LR scale `0.5`, pending. This tests whether
+  reducing backbone drift can expose a useful adaptor effect.
+
+## Remaining experiments before the paper-grade matrix is complete
+
+### 1. Finish and close ISRUC LaBraM
+
+Required:
+
+1. Complete LoRA seed 3407 and record the complete three-seed result.
+2. Inspect `12760559` as a single targeted early-overfitting test. Promote it
+   to multiseed only if validation trajectory, train/validation gap, and test
+   behavior all improve coherently.
+3. Add a parameter-matched axis-blind residual control. The current generic
+   token adapter is not parameter-matched to the rank-32 aligned branch and
+   is therefore a useful negative control, not the final causal test.
+4. Run the frozen version of the final rank-32 aligned primitive against
+   frozen dense and frozen generic controls, using the same trainable-parameter
+   budget and development seeds.
+5. Stop ISRUC tuning after these gates. Do not continue broad LR, depth, or
+   adapter-variant searches if the aligned method remains below dense and
+   upper-layer controls.
+
+### 2. Complete LaBraM across the planned datasets
+
+- **FACED:** the existing FACED work is complete as an internal experiment
+  block. Before using it as primary evidence, verify that the final registry
+  contains the same protocol hash, seed policy, dense/frozen/upper-k/LoRA/
+  generic/axis-blind/aligned cells, and efficiency fields. Rerun only missing
+  cells.
+- **TUEV:** still requires preprocessing and class-support audit, dense
+  baseline, the complete control ladder, and per-class recall/precision/F1,
+  macro metrics, weighted metrics, and confusion matrices.
+- **SEED-V:** retain the within-subject reproducibility result, but add the
+  subject-disjoint/grouped evaluation required for any cross-subject claim.
+- **PhysioNet-MI:** optional; do not start it until the three shared primary
+  datasets are complete and its subject-split contract is verified.
+
+### 3. Complete the independent CBraMod path
+
+In `EEGxPlore/EEGxPlore`, independently implement and verify the same
+low-rank residual family and the same control definitions. Do not import the
+LaBraM implementation or substitute LaBraM into CBraMod. The required CBraMod
+matrix is dense, frozen, upper-k, LoRA, generic, parameter-matched axis-blind,
+aligned, and one bounded depth extension on the selected shared datasets.
+
+### 4. Add the reviewer-required analysis layer
+
+Every primary cell must report:
+
+- mean ± standard deviation across the declared seeds, per-seed values, and
+  paired differences;
+- balanced accuracy, macro F1, accuracy, kappa, and weighted F1;
+- trainable and total parameters, peak memory, wall-clock time, GPU-hours,
+  throughput, inference latency, and FLOPs/MACs where practical;
+- realized `[C,S,D]`, eligibility mask, alpha, residual ratio, gradients,
+  update norms, and adapter-on/off effects;
+- TUEV per-class results and confusion matrices;
+- exact split units and overlap audits, especially for SEED-V.
+
+## TMLR submission gate
+
+TMLR does not require a universal performance gain or a new state-of-the-art.
+Its official acceptance questions are whether the claims are supported by
+accurate, convincing, clear evidence and whether the findings would interest
+some part of its audience. A systematic study of method strengths, weaknesses,
+robustness, or generalization can satisfy that standard when it produces
+actionable insight. See the [TMLR acceptance criteria](https://jmlr.org/tmlr/acceptance-criteria.html)
+and [editorial policies](https://jmlr.org/tmlr/editorial-policies.html).
+
+There is no numeric BA or accuracy threshold. For this project, the minimum
+defensible TMLR submission should satisfy all of the following:
+
+1. At least two backbones are complete, with CBraMod and LaBraM kept in their
+   separate repositories and derived from the same prospective design rule.
+2. At least two shared primary datasets have the complete matched matrix;
+   three shared datasets (FACED, ISRUC, TUEV) are preferred.
+3. Each primary cell includes dense, frozen, upper-k, LoRA, generic,
+   parameter-matched axis-blind, and aligned controls under the same split,
+   budget, checkpoint rule, and declared seed set.
+4. Final claims use seed-complete means and uncertainty, not the best seed.
+   The final confirmatory block should use five predeclared seeds; the current
+   three-seed packets are development evidence only.
+5. The paper reports the performance–efficiency trade-off and explains both
+   positive and negative results, including ISRUC’s frozen-versus-trainable
+   regime difference and SEED-V’s geometry boundary condition.
+6. The code, protocol manifests, checkpoints, hashes, trainability summaries,
+   and analysis scripts are reproducible, with final runs made from a committed
+   and clean code state.
+
+### Method-paper threshold
+
+Use the stronger method-paper framing only if the aligned adapter has a
+positive and stable mean effect on both backbones, support on at least two
+primary datasets, a matched-budget advantage over axis-blind adaptation, and
+an efficiency or parameter-efficiency advantage over LoRA and upper-k tuning.
+
+### Controlled-study threshold
+
+If the aligned adapter does not beat dense or upper-k fine-tuning, the work can
+still be submitted to TMLR as a controlled empirical study if the matrix is
+complete and the paper establishes actionable findings such as:
+
+- native-axis eligibility predicts when an adapter can have a meaningful
+  mechanism;
+- frozen and fully trainable adaptation have different failure modes;
+- generic PEFT, LoRA, upper-layer tuning, and aligned adaptation occupy
+  different performance–efficiency regimes;
+- depth complexity is not consistently necessary;
+- realized token geometry and split protocol materially change the conclusion.
+
+Under that outcome, the title and claims should change to something like:
+
+> **When Does Encoder-Structure-Aware Adaptation Help EEG Foundation Models? A
+> Controlled Study Across CBraMod and LaBraM**
+
+The current project is not yet at either submission gate: ISRUC is close, but
+LoRA completion, parameter matching, the CBraMod matrix, efficiency reporting,
+and the remaining dataset analyses are still required. The correct near-term
+action is to finish the bounded ISRUC closeout, then move dataset-by-dataset
+and backbone-by-backbone without reopening broad adapter tuning.

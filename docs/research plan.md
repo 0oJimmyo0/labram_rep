@@ -746,3 +746,79 @@ is: use lightweight residual adaptation along a meaningful native axis of
 LaBraM's channel-patch representation. Do not add channel-plus-patch, depth,
 token MLP, or further LR sweeps until the frozen dense/channel-only paired
 result is complete.
+
+## Active ISRUC closure plan and run registry (2026-07-24)
+
+This is the current execution checklist for the LaBraM/ISRUC cell. It is a
+closure plan: once the gates are complete, ISRUC is frozen and the study moves
+to the next dataset. CBraMod experiments remain in `EEGxPlore/EEGxPlore`;
+LaBraM experiments remain in this repository.
+
+### Current interpretation
+
+The ISRUC protocol and implementation are internally verified, but dense
+baseline fidelity is not yet settled. The raw-scale dense seed-42 anchor is
+approximately BA `0.800`, above the reported LaBraM-Base value `0.7633 ±
+0.0102`. This difference may reflect input scaling or downstream recipe
+differences and must be resolved before claiming adaptor gains over a faithful
+baseline.
+
+The frozen ISRUC result is robust: full-width patch adaptation beats frozen
+dense on all three development seeds. The full-trainable channel pilot
+(`12760559`) reduces the final train/validation accuracy gap from about
+`0.107` to `0.003`, but does not improve test BA over full dense. The current
+paper message is conditional.
+
+### ISRUC run registry
+
+| Section | Required condition | Status | Promotion rule |
+|---|---|---|---|
+| Fidelity | Dense seed 42, divisor 100, strict load, final test | queued/resubmitted | Complete trajectory and scale decision |
+| Baseline | Dense full FT, selected contract, seeds 42/1024/3407 | pending fidelity gate | Mean/std with final test |
+| Optimization control | Dense backbone LR 0.1, final test | validation-only exists | Required for fair channel comparison |
+| Generic PEFT | LoRA qkv rank 8, seeds 42/1024/3407 | complete | Report generic-control mean/std |
+| Upper-layer PEFT | Upper-2, seeds 42/1024/3407 | complete development control | Report efficiency/accuracy |
+| Frozen baseline | Frozen dense, seeds 42/1024/3407 | complete | Report conditional frozen regime |
+| Frozen native adapter | Frozen full-width patch, seeds 42/1024/3407 | complete | Report conditional positive result |
+| Channel adapter | Full FT, backbone LR 0.1, seed 42 | complete pilot | Compare to matched dense LR 0.1 |
+| Channel multiseed | Same selected channel contract, seeds 42/1024/3407 | not started | Only after matched control passes |
+| Matched low-rank frozen test | Frozen rank-32 aligned vs frozen dense | not started | Only if required by final common-primitive claim |
+| Final ISRUC block | Declared method/control cells, final seed packet | not started | Freeze after checklist closure |
+
+### Exact remaining order
+
+1. Finish the isolated seed-42 `/100` dense scaling audit. Confirm the strict
+   checkpoint report, compare the full epoch trajectory with raw scale, and
+   decide whether `/100` or raw µV is the faithful LaBraM contract.
+2. Under the selected contract, complete the dense development packet with
+   seeds `{42, 1024, 3407}` and final test evaluation.
+3. Complete the dense `backbone_lr_scale=0.1` seed-42 final-test control. This
+   is required because `12760559` changes both the adaptor and backbone LR.
+4. Compare channel versus this matched dense control using validation
+   trajectories, train/validation gap, residual/update diagnostics, and final
+   test metrics. Promote channel to three seeds only if it gives a coherent
+   BA/κ/F1 or efficiency/generalization-gap advantage.
+5. Close the generic controls in the paper table, including LoRA’s three-seed
+   mean/std and the distinction between LoRA and native low-rank adapters.
+6. If the paper claims a parameter-matched common primitive, run frozen
+   rank-32 aligned versus frozen dense under the same budget. Otherwise keep
+   the full-width frozen patch result as the conditional positive study and
+   label rank-32 native adapters as negative ISRUC evidence.
+7. Freeze the ISRUC protocol, code commit, seed packet, and result table. Move
+   to the next planned dataset; do not reopen a broad ISRUC sweep.
+
+### Completion standard
+
+ISRUC is complete when the dense scaling gate is resolved, dense and matched
+LR-0.1 controls have final-test artifacts, generic controls are reported, and
+every promoted structure-aware result has either a three-seed confirmation or
+an explicit negative/pilot label. The paper must report both positive
+frozen-backbone adaptation and failure to beat full fine-tuning when that is
+what the controlled matrix shows.
+
+### Runtime policy
+
+The ISRUC launchers now request `03:00:00` rather than `12:00:00`. Completed
+30-epoch ISRUC jobs take roughly 45--60 minutes on one A6000. Future launchers
+should use measured runtime plus a safety margin; retain 12 hours only when a
+first completed run demonstrates that it is necessary.

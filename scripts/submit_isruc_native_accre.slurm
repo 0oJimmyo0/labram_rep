@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:nvidia_rtx_a6000:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --time=12:00:00
+#SBATCH --time=03:00:00
 #SBATCH --output=/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM/logs/out/%x_%j.out
 #SBATCH --error=/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM/logs/err/%x_%j.err
 
@@ -116,6 +116,7 @@ PYTHON_ARGS=(
   --labram_lora_target "$LORA_TARGET"
   --isruc_sequence_dropout "$SEQUENCE_DROPOUT"
   --input_scale_divisor 1.0
+  --strict_checkpoint_load
   --no_auto_resume
 )
 if [[ "$FROZEN_BACKBONE_EVAL_MODE" == "1" ]]; then

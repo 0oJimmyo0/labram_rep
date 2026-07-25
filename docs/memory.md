@@ -885,3 +885,88 @@ Transformer blocks plus the sequence/head layers. LoRA is not combined with
 the native channel/patch adapter. All controls use the same ISRUC manifest,
 checkpoint, batch size, epoch budget, validation-kappa selection, and final
 test evaluation.
+
+## Canonical ISRUC LaBraM progress and closeout (2026-07-24)
+
+This section supersedes earlier pending-job notes. LaBraM remains isolated in
+the `LaBraM` repository; CBraMod remains isolated in `EEGxPlore/EEGxPlore`.
+The repositories must never be wired together for a paper result.
+
+### Completed ISRUC evidence
+
+- The ISRUC loader and preprocessing contract is verified: subjects 1--80
+  train, 81--90 validation, 91--100 test; six bipolar channels; 20 epochs per
+  sequence; 30 temporal patches per epoch; validation-kappa checkpoint
+  selection; batch size 16.
+- Frozen dense versus full-width frozen patch adaptation is complete on seeds
+  `{42, 1024, 3407}`. Patch improves all three seeds, with mean BA gain about
+  `+0.150` and mean kappa gain about `+0.122`, but remains below absolute full
+  fine-tuning performance. The defensible claim is conditional usefulness in
+  the frozen-backbone regime.
+- LoRA qkv rank 8 is complete on seeds `{42, 1024, 3407}`. Test BA is about
+  `0.689--0.696` per seed, mean approximately `0.692`; it is a valid weak
+  generic frozen control, not a failed job.
+- Upper-layer and generic controls are complete as development controls.
+- Job `12760559` completed successfully. It used full backbone training with
+  backbone LR scale `0.1`, channel adapter core scale `1`, alpha LR scale
+  `0.5`, and raw input scale `1.0`. It reduced the final train/validation
+  accuracy gap to approximately `0.003`, versus about `0.107` for the raw
+  dense reference. Its primary test BA `0.7972` does not exceed dense BA
+  `0.7997`; it is evidence for overfitting control, not yet a confirmed
+  channel-adapter BA gain.
+- The channel branch is active on ISRUC `[B,6,30,D]`: channel sequence length
+  is 6, Q/K/V gradients become nonzero, alpha grows to about `0.057`, and the
+  residual correction reaches about `0.209` of the backbone feature norm.
+- The fair dense LR-scale-0.1 control has nearly the same validation BA as
+  `12760559`, so the apparent benefit may primarily be reduced backbone drift
+  rather than the channel branch itself. That control still needs final-test
+  evaluation before causal claims.
+
+### Dense-baseline fidelity gate
+
+The raw-scale dense ISRUC result is internally consistent but remains above
+the reported LaBraM-Base ISRUC result. The controlled audit changes only
+`input_scale_divisor` from `1.0` to `100.0`, retains seed 42, batch 16, 30
+epochs, LR `2e-4`, layer decay `0.65`, the same checkpoint and split, and runs
+final test evaluation. Strict checkpoint-load reporting is enabled. Job
+`12762649` was canceled before execution because its 12-hour wall time was
+unnecessarily long; the exact audit was resubmitted with a 3-hour limit.
+
+Do not promote any dense baseline to “faithful reproduction” until the audit
+has passed strict checkpoint loading, produced a complete epoch trajectory and
+final test metrics, and been compared against the raw-scale trajectory. If
+`/100` gives the expected lower regime, use it as the faithful comparison
+contract and repeat dense over the declared development seeds. If it does not,
+report the recipe difference explicitly rather than forcing agreement with the
+published number.
+
+### ISRUC run checklist before moving on
+
+- [ ] Finish the seed-42 `/100` dense audit and compare all epochs, metrics,
+      train/validation gap, and test class recalls.
+- [ ] Verify the strict checkpoint report has no unexpected missing encoder
+      keys.
+- [ ] Freeze the ISRUC input-scale contract.
+- [ ] Run dense full fine-tuning on development seeds `{42, 1024, 3407}` with
+      final test evaluation under the selected contract.
+- [ ] Run matched dense `backbone_lr_scale=0.1` with final test evaluation.
+- [x] Complete LoRA qkv rank-8 on seeds `{42, 1024, 3407}`.
+- [x] Complete upper-2, frozen dense, frozen generic, and frozen patch
+      development controls.
+- [x] Complete the seed-42 channel pilot with reduced backbone LR.
+- [ ] Promote channel to multiseeds only if the matched control shows a
+      coherent performance or efficiency/generalization-gap advantage.
+- [ ] Run frozen rank-32 aligned versus frozen dense only if required by the
+      final common-primitive claim.
+- [ ] Record per-seed mean/std, selected epochs, full trajectories, test
+      metrics, parameter count, residual/update norms, and train/validation
+      gaps for every promoted cell.
+- [ ] Freeze ISRUC and move to the next dataset after these gates; do not
+      reopen broad ISRUC sweeps.
+
+### Slurm wall-time rule
+
+Observed ISRUC 30-epoch jobs take roughly 45--60 minutes on one A6000. The
+ISRUC dense, native, and patch launchers now request `03:00:00`, leaving a
+substantial safety margin while improving queue priority. Keep 12 hours only
+for datasets or jobs whose measured runtime justifies it.
