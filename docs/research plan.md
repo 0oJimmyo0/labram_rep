@@ -1000,3 +1000,36 @@ The initial FACED comparator packet was not valid: jobs `12763810-12763822`,
 0 with NaN loss under the attempted frozen/generic/LoRA/upper recipe. They
 were failed/excluded from scientific summaries. FACED is not being rerun
 while SEED-V is active; its controls require a separate NaN-preflight repair.
+
+### SEED-V control packet: validation repair and replacement jobs (2026-07-25)
+
+The corrected control packet was audited before interpreting any metrics. The
+generic frozen cells `12763934`, `12763936`, and `12763938` failed launcher
+validation because their native-adapter core/alpha LR scales were `.1`, while
+the frozen protocol requires `1.0`. LoRA cells `12763935` and `12763939`
+passed strict loading and injection but failed an internal trainability
+assertion: LoRA parameters had been grouped with native adapters. Both are
+procedural failures, not negative experimental results.
+
+The implementation now keeps native-axis adapter and LoRA trainability
+separate, checks that LoRA is head+LoRA only, checks that frozen native mode
+is head+native-adapter only, and records separate parameter counts. The
+launcher passes the complete LoRA/upper contract explicitly and disallows
+combining LoRA with a native adapter. Tests, optimizer membership, and shell
+syntax pass.
+
+The queued pre-fix jobs were canceled. The unresolved SEED-V controls now use
+replacement jobs `12764050-12764056`:
+
+```text
+12764050-12764052: frozen generic, seeds 42/1024/3407
+12764053-12764055: independent LoRA qkv-r8, seeds 42/1024/3407
+12764056:           upper-2, seed 3407
+```
+
+Upper-2 seeds 42 and 1024 remain valid in-flight jobs `12763937` and
+`12763940`. All cells use the fixed SEED-V comparator contract (batch 16,
+LR `3e-4`, 40 epochs, `/100` input scaling, strict checkpoint loading,
+validation-kappa selection, and final test evaluation). No additional
+architecture or LR sweep should be added until this repaired packet is
+complete.

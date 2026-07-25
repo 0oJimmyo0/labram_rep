@@ -1136,3 +1136,37 @@ The initial FACED comparator packet was not valid: jobs `12763810-12763822`,
 0 with NaN loss under the attempted frozen/generic/LoRA/upper recipe. They
 were failed/excluded from scientific summaries. FACED is not being rerun
 while SEED-V is active; its controls require a separate NaN-preflight repair.
+
+### SEED-V control validation repair and replacement packet (2026-07-25)
+
+Inspection of corrected-packet jobs `12763934-12763942` found two procedural
+defects, with no scientific result lost:
+
+- generic frozen jobs `12763934`, `12763936`, and `12763938` stopped in the
+  launcher because frozen native adapters must use core and alpha LR scales
+  of `1.0`; they had been submitted with `.1`;
+- LoRA jobs `12763935` and `12763939` passed strict checkpoint loading and
+  LoRA injection but hit a SEED-V assertion because the code counted LoRA
+  A/B matrices as native adapter parameters while `adapter_type=none`.
+
+The training code now reports `adapter` and `lora` as separate components,
+requires frozen mode to leave only head/native-adapter parameters trainable,
+requires LoRA mode to leave only head/LoRA parameters trainable, and records
+native-adapter and LoRA parameter counts independently. The launcher now
+passes upper/LoRA arguments explicitly and rejects combining LoRA with a
+native adapter. Structural tests and optimizer-membership checks pass.
+
+The two queued pre-fix jobs were canceled and the seven unresolved cells were
+resubmitted under commit `b5d9d77` with the unchanged SEED-V control contract:
+
+```text
+generic frozen: 12764050 (s42), 12764051 (s1024), 12764052 (s3407)
+LoRA qkv-r8:    12764053 (s42), 12764054 (s1024), 12764055 (s3407)
+upper-2:        12764056 (s3407)
+```
+
+Upper-2 seeds 42 and 1024 remain valid in-flight jobs `12763937` and
+`12763940`; their mode does not exercise either repaired assertion. All
+replacement cells retain batch `16`, LR `3e-4`, `/100` scaling, 40 epochs,
+strict checkpoint loading, validation-kappa selection, and final test
+evaluation. These are comparator controls, not new adapter tuning.
