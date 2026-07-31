@@ -30,7 +30,7 @@ datasets:
   mechanism: [SEED-V]
   optional: [PhysioNet-MI]
   development_seeds: [42, 1024, 3407]
-  final_seed_count: 5
+  final_seed_count: 3
 selection:
   development_metric: validation_cohen_kappa
   validation_sensitivity_metric: validation_balanced_accuracy

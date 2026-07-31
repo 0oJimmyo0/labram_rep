@@ -1,21 +1,86 @@
 # LaBraM Adapter Progress Memory
 
-> **Current canonical handoff added 2026-07-23.** The unified scientific plan
+> **Current canonical handoff updated 2026-07-29.** The unified scientific plan
 > is [`cross_backbone_execution_plan.md`](cross_backbone_execution_plan.md).
 > The chronological material below is retained as historical evidence; new
 > LaBraM work must follow the current handoff and contract.
 
-## Current paper identity and repository boundary
+## Canonical two-manuscript identity and repository boundary
 
-The revised paper is **Interaction-Aligned Adaptation for EEG Foundation
-Models**. This repository owns LaBraM experiments only:
+The project now has two scientifically distinct manuscripts. They share only
+high-level motivation and carefully documented loader/checkpoint utilities;
+they do not share experiment ownership, trained model families, numerical
+results, figures, tables, or primary conclusions.
 
-- repository: `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM`;
-- branch: `adaptor`;
-- audit HEAD: `973b61f`;
-- working tree at audit: clean;
-- CBraMod experiments belong only in
-  `/data/neurogroup/mingyangjiang/EEGxPlore/EEGxPlore`.
+### TMLR: interaction-aligned adaptation
+
+Working title: **Interaction-Aligned Adaptation for EEG Foundation Models**.
+Fallback title: **When Does Interaction-Aligned Adaptation Help EEG Foundation
+Models?**
+
+TMLR asks whether one common low-rank residual interaction primitive is more
+useful when placed on a backbone's native, non-degenerate interaction axis. The
+TMLR backbone/repository ownership is:
+
+- LaBraM experiments: this repository, `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM`;
+- CBraMod experiments: a new dedicated clone of the **original CBraMod
+  repository**, with its path, remote, and commit recorded before coding;
+- the EEGxPlore CBraMod implementation is not the TMLR CBraMod implementation;
+- CBraMod and LaBraM must never be wired into one another or substituted across
+  repositories.
+
+The common TMLR family is `Down -> native-axis mixer -> Up`, inserted as a
+zero-initialized residual update. The eligible axis is determined by both
+backbone semantics and realized runtime geometry. For LaBraM `[B,C,S,D]`,
+channel and patch branches are tested only when their sequence length is
+greater than one. For CBraMod, the adapter preserves the backbone's native
+spatial/channel and temporal/spectral branch separation and recombination.
+The TMLR study excludes depth aggregation, depth-summary routing, typed
+specialist MoE, compact EEG/PSD routers, and the historical depth-aware model.
+
+TMLR's required comparison family is frozen-backbone plus head, full
+fine-tuning, upper-block controls, generic bottleneck, independent LoRA,
+parameter-matched axis-blind residual control, and interaction-aligned
+channel-only/patch-only/channel-plus-patch variants. The paper must report
+three-seed mean and standard deviation, validation-selected test results,
+balanced accuracy and macro-F1 as primary metrics, secondary kappa/weighted
+F1, per-class imbalance analysis, trainable parameters, residual norms, alpha,
+gradient/update diagnostics, and efficiency measures. Beating dense
+fine-tuning alone is not sufficient evidence for alignment; the
+parameter-matched axis-blind control is the causal comparison.
+
+### Deferred ICASSP boundary: CBraMod depth probing and fusion
+
+Working title: **Depth Probing and Fusion in Pretrained EEG Encoders**.
+Fallback title: **When Do Earlier CBraMod Layers Improve Downstream EEG
+Decoding?**
+
+ICASSP stays in the existing EEGxPlore repository and uses **CBraMod only**.
+This design is retained as a boundary condition, but it is not an active
+execution target while TMLR is being completed.
+It studies frozen or nearly frozen CBraMod layer probes and lightweight depth
+fusion: final-layer probe, prespecified individual depths, uniform fusion,
+learned global scalar fusion, and—only if interpretable—a compact
+sample-conditioned depth probe. Its analyses are layer-wise performance,
+learned depth weights and entropy, earlier-layer mass, seed consistency,
+class-conditioned weights, per-class recall/F1, final-only and uniform-fusion
+interventions, dominant-depth removal, and parameter/latency/memory cost.
+
+ICASSP must not contain LaBraM, TMLR interaction-aligned adapters,
+channel/patch eligibility tests, TMLR low-rank operator comparisons, LoRA vs
+aligned-adapter comparisons, axis-blind controls, or TMLR efficiency tables.
+ICASSP may conclude positive, mixed, or negative depending on whether earlier
+layers provide stable complementary information.
+
+### TMLR-only execution priority
+
+ICASSP is postponed. The active objective is to complete the TMLR
+cross-backbone adaptation study first. A loader or checkpoint format may be
+shared when technically necessary, but every experiment belongs to exactly one
+manuscript. Numerical results, trained model families, figures, tables,
+manuscript text, primary analyses, and central conclusions may not be reused
+across the two submissions. The old NeurIPS workflow and the historical
+EEGxPlore LaBraM-substitution path remain historical evidence only.
 
 Never import or wire the CBraMod backbone into LaBraM training, and never use
 the historical EEGxPlore LaBraM-substitution path as a LaBraM paper result.
@@ -48,16 +113,28 @@ the historical EEGxPlore LaBraM-substitution path as a LaBraM paper result.
 - Depth and patch-axis results are diagnostic and must not be promoted to the
   primary claim without the common low-rank, matched-budget protocol.
 
-## Current LaBraM sequence
+## Current TMLR execution sequence
 
-1. Finish ISRUC protocol replication and dense baseline.
-2. Implement and parity-test the common low-rank axis primitive. (Complete;
-   ISRUC confirmation and matched controls remain pending.)
-3. Add matched upper-k, LoRA, generic bottleneck, and axis-blind controls.
-4. Complete formal LaBraM ISRUC, FACED, and TUEV matrix; add PhysioNet-MI only
-   after its data audit.
-5. Freeze LaBraM method/protocol before final five-seed test access.
-6. Only then return to CBraMod in EEGxPlore for the parallel protocol audit.
+1. Close the LaBraM/TUEV block using the existing registry and exact
+   three-seed rule; inspect remaining trajectories and multiseed cells without
+   introducing another adapter design.
+2. Freeze the LaBraM TMLR implementation, protocol, and result registry as the
+   first instantiation of the common pipeline.
+3. Create a clean clone of the original CBraMod repository, and record its
+   remote, commit, data contract, and independent TMLR result registry.
+4. Audit CBraMod's native branches and realized token geometry before coding.
+   This is a design gate, not permission to copy the LaBraM module literally.
+5. Start CBraMod TMLR with FACED: faithful dense baseline first, then the same
+   frozen/full/upper/LoRA/generic/axis-blind/aligned comparison ladder.
+6. Apply the same protocol and three-seed closure checklist to the remaining
+   datasets. The backbone-specific code may map semantic axes differently,
+   but the research question, operator family, budgets, controls, and claims
+   must remain shared.
+7. Keep ICASSP deferred until the TMLR cross-backbone matrix is locked.
+
+The design must never become “one backbone, one bespoke adapter.” It is one
+reproducible adaptation pipeline with backbone-specific axis mappings required
+by the native encoder geometry.
 
 ## Current status labels
 
@@ -68,13 +145,16 @@ the historical EEGxPlore LaBraM-substitution path as a LaBraM paper result.
 - `pending`: required for the revised paper;
 - `blocked`: only when an external data/provenance dependency prevents progress.
 
-Last updated: 2026-07-23
+Last updated: 2026-07-29
 
 ## Repository State
 
 - Repository: `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM`
 - Branch: `adaptor`
-- Current implementation commit: `7ca74e2` (`Add separate LaBraM alpha gate controls`)
+- Current implementation lineage includes `7ca74e2` (`Add separate LaBraM
+  alpha gate controls`); current HEAD at this update is `2e5840c`.
+- The working tree contains existing experiment/code changes; this
+  documentation update preserved them.
 - FACED checkpoint SHA: `7c5058...37c`
 - Data root: `/data/neurogroup/mingyangjiang/data/FACED`
 - Logs: `logs/out/<RUN_ID>/` and `logs/err/<RUN_ID>/`
@@ -848,7 +928,7 @@ protocol gate
   -> matched low-rank interaction-aligned adapter
   -> channel-off/patch-off/both-axis and one depth extension
   -> stop single-seed tuning and run development multiseeds
-  -> freeze method and run final five-seed test block
+  -> freeze method and run final locked three-seed test block
 ```
 
 Test metrics may be recorded for every run, but validation remains the only
@@ -889,8 +969,9 @@ test evaluation.
 ## Canonical ISRUC LaBraM progress and closeout (2026-07-24)
 
 This section supersedes earlier pending-job notes. LaBraM remains isolated in
-the `LaBraM` repository; CBraMod remains isolated in `EEGxPlore/EEGxPlore`.
-The repositories must never be wired together for a paper result.
+the `LaBraM` repository; CBraMod TMLR belongs in the dedicated original-CBraMod
+clone, and CBraMod ICASSP depth work remains in `EEGxPlore/EEGxPlore`. The
+repositories must never be wired together for a paper result.
 
 ### Completed ISRUC evidence
 
@@ -1170,3 +1251,537 @@ Upper-2 seeds 42 and 1024 remain valid in-flight jobs `12763937` and
 replacement cells retain batch `16`, LR `3e-4`, `/100` scaling, 40 epochs,
 strict checkpoint loading, validation-kappa selection, and final test
 evaluation. These are comparator controls, not new adapter tuning.
+
+## Historical handoff: FACED closed; PhysioNet-MI record (2026-07-26)
+
+This section is retained for dataset provenance and completed LaBraM evidence.
+The active 2026-07-29 TMLR-only sequence above supersedes its execution order.
+Historical job IDs and old “still required” language must not be used to
+schedule duplicate experiments.
+
+### FACED closure
+
+FACED is complete for the current LaBraM paper matrix. The canonical native
+development packets are:
+
+- dense full fine-tuning:
+  `checkpoints/faced_labram_dense_lr7e4_e80_seed{42,1024,3407}`;
+- native patch-only adaptation:
+  `checkpoints/faced_labram_patch_a001_lr7e4_e80_seed{42,1024,3407}`;
+- historical depth/component ablations, retained as diagnostic evidence;
+- corrected frozen controls, evaluated with `frozen_backbone_eval_mode=true`:
+  frozen dense, frozen patch, and frozen generic bottleneck on seeds
+  `{42,1024,3407}`.
+
+The corrected frozen-control jobs were `12777453-12777461` and all completed
+with strict checkpoint loading, 80 unique epochs, validation-kappa selection,
+and final test evaluation. Their final test means are:
+
+| control | BA | kappa | F1 |
+|---|---:|---:|---:|
+| frozen dense | 0.1589 +/- 0.0003 | 0.0566 +/- 0.0003 | 0.1539 +/- 0.0002 |
+| frozen patch | 0.1624 +/- 0.0034 | 0.0577 +/- 0.0039 | 0.1613 +/- 0.0061 |
+| frozen generic | 0.1859 +/- 0.0050 | 0.0842 +/- 0.0058 | 0.1831 +/- 0.0057 |
+
+The frozen dense trajectory is weak/underfit, frozen patch rapidly memorizes
+the training set without a robust validation or test gain, and frozen generic
+is a modest but consistent capacity control. The frozen patch result is not a
+positive structure-aware claim. The native patch result may be reported only
+as a trainable-backbone FACED result, with its validation/test variability
+shown explicitly. The earlier FACED frozen packet (`12763810-12763822`,
+`12763824`, `12763826`) is excluded because it did not enable frozen eval mode;
+it is not evidence against frozen adaptation. Valid trainable LoRA/upper-layer
+controls remain comparator evidence, but no new FACED run is required.
+
+Conclusion: FACED is closed. Do not add more FACED tuning, depth sweeps, or
+duplicate seeds unless a reproducibility audit finds a concrete contract
+violation.
+
+### PhysioNet-MI execution gate
+
+PhysioNet-MI remains a documented LaBraM dataset block. Any future TMLR
+follow-up must use the LaBraM repository; CBraMod belongs either in the
+dedicated original-CBraMod TMLR clone or, for deferred ICASSP depth work, in
+`EEGxPlore/EEGxPlore`. The two backbones are never wired together.
+
+The current data location is `/data/neurogroup/mingyangjiang/data/PHYSIO_MI`.
+The available source is serialized LMDB (`data.mdb`/`lock.mdb`); the original
+raw recording tree is not currently available. Therefore no training result
+may be called a faithful replication until the following are recorded:
+
+1. LMDB key/schema inspection, total records, tensor shape, finite-value
+   checks, label set, class counts, and any subject/session identifiers;
+2. provenance and preprocessing evidence: source script or documented
+   serialized preprocessing, sampling rate, filters, resampling, scaling,
+   window length/stride, channel names/order, montage, and channel-position
+   information;
+3. exact train/validation/test split construction, subject/session
+   disjointness, split hash, per-class support, and leakage checks;
+4. the LaBraM input contract after preprocessing, including input scaling and
+   the realized `[B,C,S,D]` geometry.
+
+If the original preprocessing cannot be recovered, label the experiment
+“serialized-PhysioNet-MI protocol” and state the provenance limitation rather
+than claiming exact raw-data replication. Do not silently infer channel
+positions or reorder electrodes.
+
+### PhysioNet-MI audit result (2026-07-26)
+
+The available LMDB was inspected read-only and matches the EEGxPlore
+`preprocessing/preprocessing_physio.py` contract:
+
+- LMDB: `/data/neurogroup/mingyangjiang/data/PHYSIO_MI/data.mdb`, size
+  4,070,227,968 bytes, SHA-256
+  `2a51ca7523a149a5528b77bdc5f0c73c5a36095c0a3feb8c4fc9b179af5e71d0`;
+- indexed records: 9,837, plus the `__keys__` split index;
+- splits: train 6,300, validation 1,734, test 1,803;
+- subjects: train `S001-S070`, validation `S071-S089`, test `S090-S109`,
+  with disjoint subject sets;
+- class counts: train `{0:1593, 1:1557, 2:1581, 3:1569}`, validation
+  `{0:435, 1:432, 2:434, 3:433}`, test `{0:451, 1:449, 2:450, 3:453}`;
+- every indexed record has schema `{'sample','label'}`, finite float64 sample
+  shape `(64,4,200)`, and no missing/unindexed/corrupt records;
+- split-index SHA-256:
+  `129909ad3054357d25d4bb04d68738e8478bc76673503a861a1befabf669e5b0`;
+- stored raw-value standard deviations are train/val/test
+  `36.6736/34.9148/40.3890`; the EEGxPlore loader returns `sample / 100`,
+  giving `0.366736/0.349147/0.403890` after scaling.
+
+The source preprocessing selects 64 channels in the explicit
+`selected_channels` order, uses tasks R04/R06/R08/R10/R12/R14, average
+reference, 0.3-Hz high-pass filtering, 60-Hz notch filtering, 200-Hz
+resampling, four-second epochs, the final 800 samples, and the fixed subject
+split formed from sorted subject directories (70/19/20). The stored keys
+reflect skipped event-1 epochs, so trial suffixes beginning at `-1` are
+expected and must not be “corrected.” The preprocessing script SHA-256 is
+`823217891671d485c1438c1396596b822b6be7ab4176bd7114d6b42d8e90c19e`.
+
+The audit passes the serialized-data gate. It does not prove raw EDF
+provenance because the raw tree is absent. The existing EEGxPlore
+`scripts/PHYSIO-MI/train_physio_compact_shared.slurm` and
+`models/model_for_physio.py` are CBraMod/MoE code and are not a LaBraM
+baseline. LaBraM currently has no PhysioNet-MI branch in
+`run_class_finetuning.py`; the next implementation step is a LaBraM-only
+loader/wrapper that consumes these preprocessed tensors, applies the same
+`/100` scaling, preserves the 64-channel order and four temporal patches, and
+records this repository boundary explicitly.
+
+### LaBraM PhysioNet-MI implementation status (2026-07-26)
+
+Implemented entirely in this repository:
+
+- `utils.py:PHYSIONET_MI_LABRAM_CH` stores the exact 64-row channel order;
+- `utils.py:PhysioNetMILoader` reads the LMDB lazily, validates
+  `(64,4,200)`, labels `[0,3]`, finite values, split keys, and subject
+  disjointness, and returns raw tensors;
+- `run_class_finetuning.py` registers `PhysioNet-MI` with four classes and
+  LaBraM channel-position mapping;
+- `scripts/submit_physio_mi_dense_accre.slurm` runs the LaBraM-only dense
+  baseline with engine-side `/100` scaling, strict checkpoint loading, and
+  final test evaluation.
+
+The first smoke baseline `12786217` completed its protocol gate successfully:
+strict loading, correct data contract, finite inputs, and final test access
+all worked. Its three-epoch performance was random-guess level (test BA
+`0.2500`, kappa `0.0000`, weighted F1 `0.1009`) and it showed approximately
+1% AMP gradient-step skips in the first two epochs, so it is not a scientific
+baseline. The run also exposed missing batch/epoch fields in `run_config`.
+
+The provenance fields are now recorded. The initial conservative full run
+`12788099` (seed 42, LR `1e-4`) is retained as a historical sensitivity
+anchor. It was superseded as the primary dense contract by the completed
+`LR=5e-4` sweep and locked three-seed packet below.
+
+### PhysioNet-MI run checklist
+
+Do not submit the comparison packet until the data audit passes. Then use the
+following fixed sequence:
+
+1. **Faithful dense baseline:** reproduce the available source protocol,
+   checkpoint, loader, scaling, split, batch size, optimizer/LR, schedule, and
+   epoch budget. Run development seeds `{42,1024,3407}`. Select checkpoints by
+   validation Cohen kappa only; report complete train/validation trajectories
+   and final test accuracy, balanced accuracy, kappa, macro-F1, and weighted-F1.
+   Record strict checkpoint-load status, input statistics, split hash,
+   trainable parameter count, and the complete CLI/run contract.
+2. **Frozen probe:** frozen LaBraM plus the shared classifier/head, with
+   `frozen_backbone_eval_mode=true`, using the same split and seed packet.
+3. **Geometry gate:** determine whether channel and/or temporal-patch axes
+   have meaningful sequence length and nonzero Q/K/V gradients. Only eligible
+   axes can support a primary native adapter claim.
+4. **Native adaptation:** run the eligible channel-only or patch-only adapter;
+   run channel+patch only when both axes are meaningful. Keep the native
+   adapter separate from LoRA and use the same dense baseline contract.
+5. **Independent comparison approaches:** run generic bottleneck, LoRA
+   qkv-r8, and upper-2 controls as separate methods. Add a parameter-matched
+   axis-blind control when needed for the paper’s capacity claim. Do not
+   combine LoRA with channel/patch adaptation.
+6. **Secondary diagnostics:** run depth only when its axis is meaningful and
+   report adapter alpha, residual/update norms, Q/K/V gradients, parameter
+   counts, and train-validation gaps. Do not promote a degenerate-axis result.
+7. **Closure:** after the three-seed packet is valid and the promotion rule is
+   met, freeze the dataset section. Use the same three seeds for the final
+   locked test table; do not launch broad hyperparameter sweeps by default.
+
+The PhysioNet-MI claim must therefore be framed relative to the faithful dense
+baseline: native adaptation is a lightweight, geometry-matched alternative
+when limiting backbone drift is valuable, not a universal replacement for
+full fine-tuning. Every dataset must contain the same baseline, native,
+frozen, and independent-control logic before it is marked complete.
+
+### PhysioNet-MI dense contract lock (2026-07-26)
+
+The seed-42 LR sensitivity packet completed successfully. The `5e-4` setting
+is now the locked PhysioNet-MI dense contract because it improved both
+validation and held-out test performance while leaving the data, checkpoint,
+model geometry, and selection rule unchanged:
+
+- batch size `64`, epochs `40`, AdamW, weight decay `0.05`;
+- LR `5e-4`, layer decay `0.65`, five warmup epochs, label smoothing `0.1`;
+- gradient clipping `1.0`, `/100` engine scaling, strict checkpoint loading;
+- validation Cohen-kappa selection, with validation-BA sensitivity selection;
+- fixed multiseed packet `{42,1024,3407}`.
+
+The seed-42 locked run is
+`physio_mi_labram_dense_sweep_lr5e4_s42_b64_e40_scale100` and achieved test
+BA `0.6123`, kappa `0.4830`, and weighted F1 `0.6142`. For context, the old
+`1e-4` anchor achieved test BA `0.5581`; it is retained as a historical
+sensitivity result, not the primary baseline.
+
+The locked dense packet is complete. Seed 42 is the completed sweep run;
+jobs `12789351` and `12789352` completed seeds 1024 and 3407 with exit code
+`0:0`. All three runs completed 40 epochs, produced strict-load reports and
+selected checkpoints, and passed the artifact gate.
+
+Locked dense results, selected by validation kappa:
+
+| seed | best epoch | val BA | test BA | test kappa | test weighted F1 |
+|---:|---:|---:|---:|---:|---:|
+| 42 | 22 | 0.5761 | 0.6123 | 0.4830 | 0.6142 |
+| 1024 | 17 | 0.5744 | 0.6223 | 0.4964 | 0.6233 |
+| 3407 | 18 | 0.5382 | 0.5933 | 0.4579 | 0.5933 |
+| mean +/- sample SD | — | 0.5629 +/- 0.0214 | 0.6093 +/- 0.0147 | 0.4791 +/- 0.0196 | 0.6103 +/- 0.0154 |
+
+The trajectory is consistent across seeds: learning begins around epochs
+8-10, validation peaks at epochs 17-22, and training accuracy continues to
+rise afterward, so moderate late overfitting is present but there is no
+collapse or class-support failure. The seed-3407 result is lower but remains
+well above chance and is a valid member of the fixed three-seed packet.
+
+All subsequent PhysioNet-MI frozen, native-adapter, LoRA, generic, and
+comparator runs must inherit this contract unless explicitly labeled as a
+sensitivity experiment. Do not mix this LaBraM contract with the CBraMod
+PhysioNet-MI pipeline in EEGxPlore.
+
+### PhysioNet-MI remaining experiment checklist after dense closure
+
+The dense baseline gate is complete. The remaining paper-grade PhysioNet-MI
+block is:
+
+1. **Geometry gate:** record the realized LaBraM grid `[C,S,D]=[64,4,D]`
+   and channel/patch Q-K-V and output gradients. Both channel (`C=64`) and
+   temporal-patch (`S=4`) axes are eligible in principle; eligibility must be
+   confirmed in the run diagnostics.
+2. **Frozen probe:** frozen LaBraM plus shared head, seeds
+   `{42,1024,3407}`.
+3. **Frozen native comparison:** frozen LaBraM plus the promoted native
+   channel/patch adapter, same three seeds, with adapter diagnostics.
+4. **Full-backbone native matrix:** channel-only and patch-only, and
+   channel+patch if both branches pass the geometry gate; three seeds for
+   every retained condition.
+5. **Independent controls:** frozen generic bottleneck, LoRA qkv-r8, and
+   upper-2 fine-tuning, each on all three seeds. Add the parameter-matched
+   axis-blind control if the manuscript makes an explicit capacity-matching
+   claim.
+6. **Depth secondary ablation:** only if the depth intervention is
+   scientifically meaningful; otherwise mark it inapplicable with the
+   geometry evidence. Do not promote it as a primary adapter.
+7. **Closure diagnostics:** aggregate complete epoch trajectories, final
+   test accuracy/BA/kappa/macro-F1/weighted-F1, train-validation gaps,
+   trainable parameters, strict checkpoint reports, alpha/residual/update
+   norms, and efficiency measurements. Then freeze the PhysioNet-MI table.
+
+Thus, the dense baseline is no longer a remaining run. The remaining work is
+the frozen/native/comparator matrix and its diagnostics; no further dense LR
+sweep is justified.
+
+### PhysioNet-MI closure after the complete three-seed packet (2026-07-27)
+
+The PhysioNet-MI LaBraM block is complete under the current dataset checklist.
+All canonical conditions use the same LaBraM-only loader, channel order,
+`(64,4,200)` geometry, `/100` engine scaling, batch size `64`, 40 epochs,
+LR `5e-4`, strict checkpoint loading, validation-kappa selection, final test
+evaluation, and seeds `{42,1024,3407}`.
+
+Completed canonical packets:
+
+- dense full fine-tuning: `0.6093 +/- 0.0147` test BA;
+- frozen dense probe: three seeds, test BA approximately `0.269`;
+- frozen channel+patch low-rank adapter: three seeds, modest conditional
+  improvement over frozen dense, test BA approximately `0.283`;
+- full-backbone channel-only: `0.6153 +/- 0.0123` test BA;
+- full-backbone patch-only: `0.6256 +/- 0.0100` test BA;
+- full-backbone channel+patch: `0.6253 +/- 0.0082` test BA;
+- frozen generic bottleneck, LoRA qkv-r8, and upper-2-layer controls: three
+  seeds each, all with complete epoch trajectories and final test metrics.
+
+The original patch-only jobs `12791423-12791425` failed before training due
+to an over-strict launcher geometry assertion that incorrectly required
+channel-attention activity for a patch-only adapter. They are retained as
+failed provenance attempts. The corrected canonical replacements
+`12799545-12799547` passed the patch geometry gate, strict checkpoint load,
+40-epoch training, and final test evaluation. No patch result from the failed
+attempts is used.
+
+The primary PhysioNet-MI conclusion is bounded: native-axis adaptation is a
+structure-aware alternative that can provide a modest gain over dense
+fine-tuning in this protocol, especially for patch and channel+patch
+conditions, but it is not a universal replacement for dense fine-tuning.
+Generic frozen adaptation remains near chance; LoRA and upper-layer controls
+are below the dense baseline. Native validation trajectories still show early
+learning followed by late validation saturation/decline, so checkpoint
+selection and the train-validation gap remain part of the reported result.
+
+PhysioNet-MI is closed for the current required matrix. Parameter-matched
+axis-blind adaptation remains optional and is not included in this closure;
+it must be added before making a strong matched-capacity axis-blind claim.
+Depth remains secondary and was not promoted because it is not needed for the
+current primary conclusion. The next active LaBraM dataset is TUEV: first
+perform its data/provenance, class-support, split-hash, channel-order, and
+scaling audit, then replicate the dense baseline before any adapter runs.
+
+### TUEV LaBraM transition and provenance gate (2026-07-27)
+
+TUEV is now the active LaBraM dataset. CBraMod remains isolated in the
+EEGxPlore repository; no backbone or preprocessing code is mixed between the
+repositories.
+
+Verified source/provenance contract:
+
+- source preprocessing: EEGxPlore `preprocessing_tuev.py`, SHA256
+  `3ec3ae3967353f86f4c970bdf86e7382e59bc492b7397382372f6b429231c6f3`;
+- serialized records contain `signal` and `label`, with raw signal shape
+  `[16,1000]`, finite float data, and labels `1..6`;
+- the LaBraM loader preserves the EEGxPlore bipolar order:
+  `FP1-F7, F7-T7, T7-P7, P7-O1, FP2-F8, F8-T8, T8-P8, P8-O2,
+  FP1-F3, F3-C3, C3-P3, P3-O1, FP2-F4, F4-C4, C4-P4, P4-O2`;
+- loader geometry is `[16,5,200]`; the engine applies exactly one `/100`
+  scale; model labels are converted to `0..5`;
+- split sizes are train `68,712`, validation `15,220`, and test `29,421`;
+- split manifest SHA256 values are train
+  `988661443a75f7ef3a65a14321fe9591da5163e3e55a2b7719b628a606a8c60f`,
+  validation `3d711a9903b596469eb8e4b1179dd7c9c8ce7e902042135dc7263f30d8b40e78`,
+  and test `9b59f733d446511b0c1aa14f3bc8c16023a4a84691b0007e2dc427853c77924a`;
+- the serialized train split has class counts
+  `{1:578, 2:8936, 3:5684, 4:737, 5:8409, 6:44368}`; validation/test
+  class-support scans remain pending because of slow shared-filesystem I/O.
+
+A direct standard-1020 lookup is invalid for the final eight bipolar rows:
+16 bipolar channels exceed LaBraM's 128-channel positional table. The
+scientifically explicit TUEV policy is therefore to preserve the serialized
+bipolar order and use sequential absolute positional slots `1..16`, with
+`input_chans=None`. The preflight produces `[1,81,200]` tokens and passes.
+This policy is recorded in every TUEV run contract as
+`sequential_pos_embed_slots_1_to_16`; it is not an accidental channel-name
+substitution.
+
+Historical TUEV jobs did not produce a trustworthy baseline: they failed due
+to environment/checkpoint/geometry/shape issues. A first batch-16 smoke was
+cancelled after showing impractical throughput (`4,294` steps/epoch). The
+replacement launcher `scripts/submit_tuev_dense_audit_accre.slurm` adds
+sorted file order, strict checkpoint-load diagnostics, geometry/finiteness
+preflight, explicit `/100` scaling, no auto-resume, and final test
+evaluation. Its practical fixed contract is batch `64`, `25` epochs, AdamW,
+LR `5e-4`, weight decay `.05`, layer decay `.65`, five warmup epochs, drop
+path `.1`, label smoothing `.1`, no gradient clipping, and seed packet
+`{42,1024,3407}`. Batch/epoch choices are explicitly recorded as the
+operational TUEV contract because batch-16 was infeasible; the model and
+optimizer recipe remain unchanged.
+
+Current jobs:
+
+- `12802746`: seed-42 one-epoch smoke/preflight, batch 64; training and
+  validation completed with finite inputs/outputs, strict checkpoint pass,
+  and AMP recovery. Its validation BA/kappa/weighted-F1 were `0.5956`,
+  `0.6692`, and `0.8180`; it is a gate, not a paper baseline;
+- `12802748`: the initial 40-epoch seed-42 baseline was cancelled after
+  `6:54` when the common comparison budget was changed to 25 epochs. Its
+  partial trajectory is not used scientifically;
+- `12803131`--`12803134`: controlled seed-42 LR sweep at `1e-4`, `2.5e-4`,
+  `5e-4`, and `1e-3`, respectively; all use batch 64, 25 epochs, five warmup
+  epochs, `/100` scaling, strict loading, and final test evaluation.
+
+Do not submit TUEV adapters or the other two dense seeds until the LR sweep
+identifies the 25-epoch contract and its artifact gate passes. Then submit
+exactly seeds `1024` and `3407` under the selected setting, followed by the
+checklist's frozen/native/LoRA/generic/upper controls. No TUEV dense sweep
+metric is yet a paper result.
+
+### TUEV registry preparation (2026-07-27)
+
+The post-sweep TUEV registry is prepared but intentionally not submitted.
+`scripts/submit_tuev_registry_accre.slurm` centralizes the 25-epoch contract
+for `full_dense`, `frozen_dense`, frozen native `channel`/`patch`/
+`channel_patch`, trainable native `channel`/`patch`/`channel_patch`, generic
+frozen bottleneck, independent LoRA qkv-r8, upper-2, and an opt-in
+`native_depth` condition. `scripts/queue_tuev_registry.sh` requires an
+explicit validation-selected `TUEV_LR` and defaults to the fixed seed packet
+`{42,1024,3407}`; it performs no submission until called.
+
+All registry conditions inherit batch `64`, 25 epochs, five warmup epochs,
+AdamW weight decay `.05`, layer decay `.65`, label smoothing `.1`, `/100`
+scaling, strict checkpoint loading, sequential positional slots `1..16`,
+validation-kappa selection, validation-BA sensitivity selection, and final
+test-only-after-selection evaluation. Native low-rank channel/patch branches
+are kept separate from generic LoRA, consistent with the paper's method
+ladder.
+
+The registry preflight passed for every prepared geometry: dense/frozen,
+native channel, native patch, native channel+patch, generic, upper-2, native
+depth, and LoRA. TUEV realizes `[C,S,D]=[16,5,200]`, so both channel and
+temporal-patch interaction branches are eligible and report active sequence
+lengths. The optional `axis_blind` method requires an explicit native adapter
+parameter target and enforces a `+/-5%` trainable-parameter match before it
+can run; it is not silently conflated with the generic control. Native depth
+is opt-in after the aligned channel+patch trajectory passes its gate.
+
+Once the LR sweep selects a TUEV setting, the remaining order is: complete
+the dense three-seed packet, run the frozen probe and frozen/native controls,
+run full-backbone native channel/patch/channel+patch, then run generic, LoRA,
+upper-2, and the parameter-matched axis-blind control. Only after those
+sections pass should the optional depth extension be queued. No registry job
+has been submitted yet.
+
+### TUEV seed-42 registry result and operational contract (2026-07-29)
+
+The seed-42 exploratory comparison registry completed successfully for all
+ten queued cells `12823148`--`12823157`. Every run completed 15 epochs with
+exit code 0, produced `log.txt`, `run_config.json`, checkpoints, and
+`final_test.json`, and recorded a strict checkpoint-load pass. The test
+target support is `[567, 4677, 1998, 329, 2204, 19646]` for model classes
+0--5. The runs used the operational TUEV contract: batch 64, LR `5e-4`,
+weight decay `.05`, layer decay `.65`, five warmup epochs, drop path `.2`,
+label smoothing `.1`, `/100` scaling, validation-kappa selection, and test
+only after selection.
+
+Trajectory-level interpretation: frozen dense learns slowly and remains
+underfit; frozen channel gives the clearest conditional frozen-backbone
+gain; frozen patch and frozen channel+patch do not improve it. Trainable
+native channel is the strongest native validation-kappa condition, but all
+native full-fine-tuning cells peak very early (epochs 2--4) and then
+overfit. BA peaks can occur later, so validation-kappa and BA checkpoints
+must remain separate. LoRA and upper-2 are valid independent controls, not
+parameter-matched comparisons.
+
+TUEV is not yet closed. The remaining required science runs are the dense
+operational contract and every comparison cell on seeds `1024` and `3407`;
+the current seed-42 cells are exploratory and should be repeated in the
+final clean three-seed packet after the code is committed. Required cells
+are frozen dense/channel/patch/channel+patch, trainable native
+channel/patch/channel+patch, generic, LoRA qkv-r8, and upper-2. Depth and
+axis-blind matched-capacity controls remain optional extensions and do not
+block minimum TUEV closure. Before final reporting, freeze a clean commit,
+confirm all run contracts, and retain alpha/residual/update norms, native
+Q/K/V gradients, parameter counts, and train-validation gaps.
+
+### TUEV LaBraM operational closure and CBraMod handoff (2026-07-31)
+
+The TUEV LaBraM block is now operationally complete. The final valid packet
+contains 11 conditions on exactly the three project seeds `{42,1024,3407}`:
+
+- full dense;
+- frozen dense, frozen channel, frozen patch, and frozen channel+patch;
+- trainable native channel, native patch, and native channel+patch;
+- independent generic bottleneck, LoRA qkv-r8, and upper-2 controls.
+
+Seed 42 uses the completed operational dense run `12812081`; the replacement
+three-seed registry is `12869559`--`12869580`. The seed-42 registry
+`12823148`--`12823157` and zero-init sensitivity jobs
+`12842524`--`12842526` are retained as diagnostics, not substituted for the
+locked packet. Every canonical condition produced `log.txt`, `run_config.json`,
+`checkpoint-best.pth`, `checkpoint-best-ba.pth`, and `final_test.json`; strict
+checkpoint loading passed. The canonical contract is batch 64, 15 epochs,
+LR `5e-4`, five warmup epochs, weight decay `.05`, layer decay `.65`, drop
+path `.2`, label smoothing `.1`, `/100` scaling, and validation-kappa primary
+selection with validation-BA sensitivity checkpoints.
+
+The primary validation-kappa-selected test BA summaries are:
+
+| Condition | Test BA (mean +/- SD) | Test kappa (mean +/- SD) | Test weighted F1 (mean +/- SD) |
+| --- | ---: | ---: | ---: |
+| Full dense | `0.5961 +/- 0.0125` | `0.5950 +/- 0.0242` | `0.7889 +/- 0.0108` |
+| Native channel | `0.5934 +/- 0.0108` | `0.5762 +/- 0.0092` | `0.7780 +/- 0.0086` |
+| Native patch | `0.5890 +/- 0.0593` | `0.5596 +/- 0.0448` | `0.7700 +/- 0.0264` |
+| Native channel+patch | `0.5901 +/- 0.0145` | `0.5412 +/- 0.0291` | `0.7556 +/- 0.0158` |
+| LoRA qkv-r8 | `0.5717 +/- 0.0229` | `0.5813 +/- 0.0183` | `0.7828 +/- 0.0073` |
+| Upper-2 | `0.5412 +/- 0.0204` | `0.5638 +/- 0.0423` | `0.7729 +/- 0.0198` |
+
+Frozen dense is `0.3658` BA. Frozen channel, patch, and channel+patch reach
+`0.4323 +/- 0.0186`, `0.3988 +/- 0.0182`, and `0.3916 +/- 0.0182`, respectively;
+this supports a conditional frozen-backbone channel benefit, but none reaches
+full dense performance. The generic frozen control is `0.4367 +/- 0.0126`.
+
+The epoch trajectories show the same failure mode seen earlier: train loss
+falls from about `1.09` to `0.44` and training accuracy approaches 99%, while
+validation kappa usually peaks in epochs 1--10 and then declines. Native
+channel is the most stable native branch, but its mean is slightly below dense
+(`-0.0027` BA); patch is high variance and channel+patch is not a reliable
+combination. Zero-output initialization did not remove early overfitting.
+These are useful negative/boundary results: TUEV does not support the claim
+that native adaptation universally replaces full fine-tuning.
+
+Historical failed/cancelled jobs are excluded from the paper packet: the
+12280583/12282548/12283655/12283679/12283758 jobs failed during the early
+environment/checkpoint/geometry phase; 12802642 and 12802748 were cancelled;
+12843245--12843260 failed before training with `QOSGrpGRES`. The LR sweeps,
+regularization probes, seed-42 registry, and zero-init runs remain provenance
+and sensitivity records only. There are no failed runs inside the locked
+three-seed TUEV packet.
+
+**Handoff decision.** TUEV is sufficient for the LaBraM operational backbone
+block. No further TUEV tuning or duplicate multiseed runs should be launched.
+The next active TMLR step is to create the dedicated clean clone of the
+original CBraMod repository, audit its native branches/checkpoint/preprocessing
+contract, and begin the CBraMod FACED dense baseline. CBraMod work must remain
+outside `EEGxPlore` and must not import or wire the LaBraM implementation.
+
+This is an operational LaBraM closure, not yet the final cross-backbone TMLR
+evidence closure. Before submission, the common TMLR registry still needs the
+prespecified parameter-matched axis-blind control (and final budget/statistical
+aggregation) wherever that claim is retained. That gate is carried forward to
+the final cross-backbone analysis rather than used to delay the CBraMod block.
+
+### CBraMod TMLR adapter implementation handoff (2026-07-31)
+
+The dedicated original-CBraMod clone is now available at
+`/data/neurogroup/mingyangjiang/EEGxPlore/CBraMod`, remote
+`https://github.com/wjq-learning/CBraMod.git`, base commit `0ff6be9`. The
+adapter is implemented only in that repository. The LaBraM repository and the
+EEGxPlore CBraMod/ICASSP repository remain untouched by the CBraMod model code.
+
+The implementation follows the common TMLR family rather than introducing a
+second method. CBraMod's runtime tensor is `[B,C,S,D]`; its own criss-cross
+layer uses `D/2` spatial features with attention over channels and `D/2`
+temporal features with attention over patches. The adapter consequently uses
+`Down -> native-axis mixer -> Up` on the spatial half for `channel`, the
+temporal half for `patch`, or both independent halves for `channel_patch`.
+It is attached after the encoder, preserves the pretrained blocks, and uses
+zero-initialized Up projections for exact dense parity. Degenerate axes are
+rejected. No LaBraM import, depth gate, MoE, router, or ICASSP code is used.
+
+Files added/changed in the CBraMod clone:
+
+- `models/interaction_adapter.py`: native spatial/temporal residual branches;
+- `models/cbramod.py`: strict-load-compatible adapter attachment and diagnostics;
+- `models/model_for_faced.py`: strict base-checkpoint load before adapter attach;
+- `tests/test_interaction_adapter.py`: dense parity, geometry, gradient, and
+  ineligible-axis tests;
+- `docs/tmlr_adapter_design.md`: method mapping and FACED gate.
+
+The model gate passes. FACED is the next dataset, but no paper run should use
+the legacy CBraMod trainer until a clean TMLR runner records the checkpoint,
+split/manifest hashes, geometry, scaling, optimizer groups, validation-selected
+checkpoints, and final test metrics. The immediate order is FACED data audit,
+seed-42 dense smoke, seed-42 native-branch screen, then the locked three-seed
+packet `{42,1024,3407}`. The axis-blind control and cross-backbone aggregation
+remain later TMLR closure work, as planned.

@@ -994,8 +994,9 @@ defensible TMLR submission should satisfy all of the following:
    parameter-matched axis-blind, and aligned controls under the same split,
    budget, checkpoint rule, and declared seed set.
 4. Final claims use seed-complete means and uncertainty, not the best seed.
-   The final confirmatory block should use five predeclared seeds; the current
-   three-seed packets are development evidence only.
+   This project uses the fixed three-seed packet `{42, 1024, 3407}` for both
+   multiseed results and the locked final test block; no five-seed block is
+   planned.
 5. The paper reports the performance–efficiency trade-off and explains both
    positive and negative results, including ISRUC’s frozen-versus-trainable
    regime difference and SEED-V’s geometry boundary condition.

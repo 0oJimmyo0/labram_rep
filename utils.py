@@ -76,6 +76,19 @@ TUEV_BIPOLAR_16_CH = [
 ISRUC_BIPOLAR_CH = ["F3-A2", "C3-A2", "O1-A2", "F4-A1", "C4-A1", "O2-A1"]
 ISRUC_LABRAM_CH = ["F3", "C3", "O1", "F4", "C4", "O2"]
 
+# Exact channel order emitted by EEGxPlore/preprocessing/preprocessing_physio.py,
+# normalized to the LaBraM standard_1020 vocabulary. The serialized PhysioNet-MI
+# LMDB does not carry channel metadata, so this in-repository constant is the
+# authoritative manifest for the stored tensor rows.
+PHYSIONET_MI_LABRAM_CH = [
+    "FC5", "FC3", "FC1", "FCZ", "FC2", "FC4", "FC6", "C5", "C3", "C1", "CZ", "C2",
+    "C4", "C6", "CP5", "CP3", "CP1", "CPZ", "CP2", "CP4", "CP6", "FP1", "FPZ", "FP2",
+    "AF7", "AF3", "AFZ", "AF4", "AF8", "F7", "F5", "F3", "F1", "FZ", "F2", "F4",
+    "F6", "F8", "FT7", "FT8", "T7", "T8", "T9", "T10", "TP7", "TP8", "P7", "P5",
+    "P3", "P1", "PZ", "P2", "P4", "P6", "P8", "PO7", "PO3", "POZ", "PO4", "PO8",
+    "O1", "OZ", "O2", "IZ",
+]
+
 
 class ISRUCSequenceLoader(torch.utils.data.Dataset):
     """Subject-wise ISRUC sequences with shape [20, 6, 30, 200]."""
@@ -155,6 +168,162 @@ def prepare_ISRUC_dataset(root):
         f"[ISRUC] train={len(train_dataset)} val={len(val_dataset)} test={len(test_dataset)} "
         f"shape={[20, 6, 30, 200]} channels={ISRUC_BIPOLAR_CH}"
     )
+    return train_dataset, test_dataset, val_dataset
+
+
+class PhysioNetMILoader(torch.utils.data.Dataset):
+    """LaBraM-only reader for the EEGxPlore PhysioNet-MI serialized LMDB.
+
+    The preprocessing contract stores each example as [64, 4, 200] in raw
+    microvolt scale. The LaBraM engine performs the single /100 input scaling;
+    this loader deliberately returns the raw tensor so scaling cannot happen
+    twice.
+    """
+
+    expected_shape = (64, 4, 200)
+    label_min = 0
+    label_max = 3
+
+    def __init__(self, root, mode="train"):
+        self.root = os.fspath(root)
+        self.mode = str(mode)
+        self.channel_names = list(PHYSIONET_MI_LABRAM_CH)
+        if len(self.channel_names) != self.expected_shape[0]:
+            raise RuntimeError(
+                f"PhysioNet-MI manifest has {len(self.channel_names)} channels; "
+                f"expected {self.expected_shape[0]}"
+            )
+        unknown_channels = [name for name in self.channel_names if name not in standard_1020]
+        if unknown_channels or len(set(self.channel_names)) != len(self.channel_names):
+            raise RuntimeError(
+                f"Invalid PhysioNet-MI LaBraM channel manifest: unknown={unknown_channels} "
+                f"duplicates={len(self.channel_names) - len(set(self.channel_names))}"
+            )
+        try:
+            import lmdb  # local import so non-LMDB datasets do not require it
+        except ImportError as exc:
+            raise ImportError("PhysioNet-MI loading requires the 'lmdb' package") from exc
+        self._lmdb = lmdb
+        self.db = None
+        with lmdb.open(
+            self.root, readonly=True, lock=False, readahead=False, meminit=False
+        ).begin(write=False) as txn:
+            raw_keys = txn.get(b"__keys__")
+        if raw_keys is None:
+            raise KeyError(f"PhysioNet-MI LMDB missing '__keys__' in {self.root}")
+        split_index = pickle.loads(raw_keys)
+        if not isinstance(split_index, dict) or self.mode not in split_index:
+            available = list(split_index) if isinstance(split_index, dict) else type(split_index).__name__
+            raise KeyError(f"PhysioNet-MI LMDB missing split {self.mode!r}; available: {available}")
+        self.keys = list(split_index[self.mode])
+        if not self.keys:
+            raise ValueError(f"PhysioNet-MI split {self.mode!r} is empty in {self.root}")
+
+        first_key = self.keys[0]
+        encoded_key = first_key.encode() if isinstance(first_key, str) else first_key
+        with lmdb.open(
+            self.root, readonly=True, lock=False, readahead=False, meminit=False
+        ).begin(write=False) as txn:
+            first_raw = txn.get(encoded_key)
+        if first_raw is None:
+            raise KeyError(f"PhysioNet-MI LMDB key not found: {first_key!r}")
+        self.sample_shape = self._validate_sample(pickle.loads(first_raw), first_key)
+
+    def __len__(self):
+        return len(self.keys)
+
+    def get_ch_names(self):
+        return list(self.channel_names)
+
+    def split_metadata(self):
+        digest = hashlib.sha256()
+        for key in self.keys:
+            encoded = key.encode("utf-8") if isinstance(key, str) else bytes(key)
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        subjects = sorted({str(key).split("R", 1)[0] for key in self.keys})
+        return {
+            "mode": self.mode,
+            "sample_count": len(self.keys),
+            "key_sha256": digest.hexdigest(),
+            "sample_shape": list(self.sample_shape),
+            "subject_count": len(subjects),
+            "subjects": subjects,
+            "channel_names": list(self.channel_names),
+        }
+
+    def _validate_sample(self, sample, key):
+        if not isinstance(sample, dict) or "sample" not in sample or "label" not in sample:
+            raise ValueError(f"PhysioNet-MI record {key!r} must contain sample and label fields")
+        signal = np.asarray(sample["sample"])
+        if tuple(signal.shape) != self.expected_shape:
+            raise ValueError(
+                f"PhysioNet-MI record {key!r} expected shape {self.expected_shape}, "
+                f"got {tuple(signal.shape)}"
+            )
+        if not np.isfinite(signal).all():
+            raise ValueError(f"PhysioNet-MI record {key!r} contains NaN or Inf")
+        label_values = np.asarray(sample["label"]).reshape(-1)
+        if label_values.size != 1:
+            raise ValueError(f"PhysioNet-MI record {key!r} must contain one scalar label")
+        label = int(label_values[0])
+        if not self.label_min <= label <= self.label_max:
+            raise ValueError(
+                f"PhysioNet-MI record {key!r} label must be in "
+                f"[{self.label_min}, {self.label_max}], got {label}"
+            )
+        return tuple(signal.shape)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["db"] = None
+        return state
+
+    def _get_db(self):
+        if self.db is None:
+            self.db = self._lmdb.open(
+                self.root,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+                max_readers=512,
+            )
+        return self.db
+
+    def __getitem__(self, index):
+        key = self.keys[index]
+        encoded_key = key.encode() if isinstance(key, str) else key
+        with self._get_db().begin(write=False) as txn:
+            raw = txn.get(encoded_key)
+        if raw is None:
+            raise KeyError(f"PhysioNet-MI LMDB key not found: {key!r}")
+        sample = pickle.loads(raw)
+        self._validate_sample(sample, key)
+        # Keep raw storage scale here. engine_for_finetuning.py owns /100.
+        return torch.FloatTensor(np.asarray(sample["sample"])), int(sample["label"])
+
+
+def prepare_PhysioNet_MI_dataset(root):
+    train_dataset = PhysioNetMILoader(root, mode="train")
+    val_dataset = PhysioNetMILoader(root, mode="val")
+    test_dataset = PhysioNetMILoader(root, mode="test")
+    train_subjects = set(train_dataset.split_metadata()["subjects"])
+    val_subjects = set(val_dataset.split_metadata()["subjects"])
+    test_subjects = set(test_dataset.split_metadata()["subjects"])
+    overlaps = {
+        "train_val": sorted(train_subjects & val_subjects),
+        "train_test": sorted(train_subjects & test_subjects),
+        "val_test": sorted(val_subjects & test_subjects),
+    }
+    if any(overlaps.values()):
+        raise RuntimeError(f"PhysioNet-MI subject overlap detected: {overlaps}")
+    print(
+        f"[PhysioNet-MI] train={len(train_dataset)} val={len(val_dataset)} "
+        f"test={len(test_dataset)} shape={list(PhysioNetMILoader.expected_shape)} "
+        f"channels={len(PHYSIONET_MI_LABRAM_CH)} scaling=engine_divide_100"
+    )
+    print(f"[PhysioNet-MI] subject-overlap checks: {overlaps}")
     return train_dataset, test_dataset, val_dataset
 
 
@@ -883,51 +1052,115 @@ class TUABLoader(torch.utils.data.Dataset):
     
 
 class TUEVLoader(torch.utils.data.Dataset):
+    """LaBraM reader for the EEGxPlore-preprocessed TUEV events.
+
+    The serialized event stores raw microvolt data as [16, 1000] with labels
+    in [1, 6].  The LaBraM engine performs the single /100 scaling, so this
+    loader deliberately returns raw values and reshapes only to the native
+    [16, 5, 200] token grid.
+    """
+
+    expected_raw_shape = (16, 1000)
+    expected_token_shape = (16, 5, 200)
+    label_min = 1
+    label_max = 6
+
     def __init__(self, root, files, sampling_rate=200):
-        self.root = root
-        self.files = files
+        self.root = os.fspath(root)
+        self.files = tuple(sorted(os.fspath(name) for name in files))
         self.default_rate = 200
         self.sampling_rate = sampling_rate
+        self.channel_names = list(TUEV_BIPOLAR_16_CH)
+        if len(self.channel_names) != self.expected_raw_shape[0]:
+            raise RuntimeError("TUEV bipolar channel manifest must contain 16 channels")
+        if not self.files:
+            raise ValueError(f"TUEV split is empty: {self.root}")
 
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, index):
-        sample = pickle.load(open(os.path.join(self.root, self.files[index]), "rb"))
-        X = sample["signal"]
+        path = os.path.join(self.root, self.files[index])
+        with open(path, "rb") as handle:
+            sample = pickle.load(handle)
+        if not isinstance(sample, dict) or "signal" not in sample or "label" not in sample:
+            raise ValueError(f"TUEV record must contain signal and label fields: {path}")
+        X = np.asarray(sample["signal"])
+        if tuple(X.shape) != self.expected_raw_shape:
+            raise ValueError(f"TUEV record {path} shape={X.shape}, expected {self.expected_raw_shape}")
+        if not np.isfinite(X).all():
+            raise ValueError(f"TUEV record {path} contains non-finite signal values")
         if self.sampling_rate != self.default_rate:
             X = resample(X, 5 * self.sampling_rate, axis=-1)
-        if X.shape[-1] % 200 != 0:
-            raise ValueError(f"TUEV sample length must be divisible by 200, got shape={X.shape}")
-        X = X.reshape(X.shape[0], -1, 200)
-        Y = int(sample["label"][0] - 1)
+        X = X.reshape(self.expected_token_shape)
+        raw_label = int(np.asarray(sample["label"]).reshape(-1)[0])
+        if not self.label_min <= raw_label <= self.label_max:
+            raise ValueError(f"TUEV record {path} label={raw_label}, expected 1..6")
+        Y = raw_label - 1
         X = torch.FloatTensor(X)
         return X, Y
+
+    def get_ch_names(self):
+        return list(self.channel_names)
+
+    def split_metadata(self):
+        digest = hashlib.sha256()
+        record_prefixes = set()
+        for name in self.files:
+            encoded = os.fsencode(name)
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            record_prefixes.add(name.split("_", 1)[0])
+        return {
+            "root": os.path.abspath(self.root),
+            "file_count": len(self.files),
+            "file_manifest_sha256": digest.hexdigest(),
+            "record_prefix_count": len(record_prefixes),
+            "record_prefixes": sorted(record_prefixes),
+            "stored_shape": list(self.expected_raw_shape),
+            "token_shape": list(self.expected_token_shape),
+            "label_range_stored": [self.label_min, self.label_max],
+            "label_range_model": [self.label_min - 1, self.label_max - 1],
+            "channel_names": list(self.channel_names),
+            "input_scale_divisor": 100.0,
+        }
     
 
 def prepare_TUEV_dataset(root):
-    # set random seed
-    seed = 4523
-    np.random.seed(seed)
-
-    train_files = os.listdir(os.path.join(root, "processed_train"))
-    val_files = os.listdir(os.path.join(root, "processed_eval"))
-    test_files = os.listdir(os.path.join(root, "processed_test"))
+    root = os.fspath(root)
+    processed_root = root
+    if not all(os.path.isdir(os.path.join(processed_root, name)) for name in (
+        "processed_train", "processed_eval", "processed_test"
+    )):
+        processed_root = os.path.join(root, "processed")
+    train_files = sorted(
+        name for name in os.listdir(os.path.join(processed_root, "processed_train"))
+        if name.endswith(".pkl")
+    )
+    val_files = sorted(
+        name for name in os.listdir(os.path.join(processed_root, "processed_eval"))
+        if name.endswith(".pkl")
+    )
+    test_files = sorted(
+        name for name in os.listdir(os.path.join(processed_root, "processed_test"))
+        if name.endswith(".pkl")
+    )
 
     # prepare training and test data loader
     train_dataset = TUEVLoader(
-        os.path.join(
-            root, "processed_train"), train_files
+        os.path.join(processed_root, "processed_train"), train_files
     )
     test_dataset = TUEVLoader(
-        os.path.join(
-            root, "processed_test"), test_files
+        os.path.join(processed_root, "processed_test"), test_files
     )
     val_dataset = TUEVLoader(
-        os.path.join(
-            root, "processed_eval"), val_files
+        os.path.join(processed_root, "processed_eval"), val_files
     )
-    print(len(train_files), len(val_files), len(test_files))
+    print(
+        f"[TUEV] train={len(train_dataset)} val={len(val_dataset)} test={len(test_dataset)} "
+        f"stored_shape={TUEVLoader.expected_raw_shape} token_shape={TUEVLoader.expected_token_shape} "
+        f"channels={TUEV_BIPOLAR_16_CH} scale=/100"
+    )
     return train_dataset, test_dataset, val_dataset
 
 

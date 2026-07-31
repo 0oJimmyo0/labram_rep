@@ -526,6 +526,7 @@ class NeuralTransformer(nn.Module):
                  adapter_bottleneck=64, adapter_num_heads=4, adapter_dropout=0.0,
                  adapter_variant="full", adapter_patch_output_dropout=0.0,
                  adapter_init_alpha=0.01, adapter_gamma=1.0,
+                 adapter_zero_init_output=False,
                  adapter_seed=12345,
                  adapter_use_token_mlp=False, adapter_depth_mode="none",
                  adapter_depth_k=4, adapter_gamma_zero_skip_branch=False,
@@ -613,6 +614,7 @@ class NeuralTransformer(nn.Module):
         if int(adapter_bottleneck) <= 0:
             raise ValueError(f"adapter_bottleneck must be positive, got {adapter_bottleneck!r}")
         self.adapter_gamma = float(adapter_gamma)
+        self.adapter_zero_init_output = bool(adapter_zero_init_output)
         self.adapter_seed = int(adapter_seed)
         self.adapter_depth_mode = adapter_depth_mode
         self.adapter_depth_k = max(1, int(adapter_depth_k))
@@ -659,6 +661,30 @@ class NeuralTransformer(nn.Module):
                     patch_output_dropout=self.adapter_patch_output_dropout,
                 )
                 self.native_axis_adapter.apply(self._init_weights)
+                if self.adapter_zero_init_output:
+                    # Start as an exact identity residual.  The previous
+                    # default initialized the final residual projections with
+                    # random weights, allowing a sizeable correction before
+                    # the native branch had learned a useful direction.
+                    zero_modules = []
+                    for name in ("channel_up", "patch_up"):
+                        module = getattr(self.native_axis_adapter, name, None)
+                        if module is not None:
+                            zero_modules.append(module)
+                    patch_attn = getattr(self.native_axis_adapter, "patch_attn", None)
+                    if patch_attn is not None and hasattr(patch_attn, "out_proj"):
+                        if not hasattr(self.native_axis_adapter, "patch_up"):
+                            zero_modules.append(patch_attn.out_proj)
+                    singleton = getattr(self.native_axis_adapter, "singleton_patch_residual", None)
+                    if singleton is not None and isinstance(singleton[-1], nn.Linear):
+                        zero_modules.append(singleton[-1])
+                    token_mlp = getattr(self.native_axis_adapter, "token_mlp", None)
+                    if token_mlp is not None and isinstance(token_mlp[-1], nn.Linear):
+                        zero_modules.append(token_mlp[-1])
+                    for module in zero_modules:
+                        nn.init.zeros_(module.weight)
+                        if module.bias is not None:
+                            nn.init.zeros_(module.bias)
                 if self.native_axis_adapter.depth_gate is not None:
                     nn.init.zeros_(self.native_axis_adapter.depth_gate[1].weight)
                     nn.init.zeros_(self.native_axis_adapter.depth_gate[1].bias)
@@ -682,6 +708,7 @@ class NeuralTransformer(nn.Module):
                 f"token_mlp={bool(adapter_use_token_mlp or self.adapter_type == 'generic')} "
                 f"depth_mode={self.adapter_depth_mode} depth_k={self.adapter_depth_k} "
                 f"fixed_alpha={self.adapter_fixed_alpha} "
+                f"zero_init_output={self.adapter_zero_init_output} "
                 f"{' '.join(alpha_info)}",
                 flush=True,
             )

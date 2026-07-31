@@ -1,26 +1,77 @@
 # Interaction-Aligned Adaptation: Canonical Cross-Backbone Execution Plan
 
-Last updated: 2026-07-23
+Last updated: 2026-07-31
 
-This is the canonical scientific plan for the cross-backbone study. The
-CBraMod implementation lives in the sibling `EEGxPlore/EEGxPlore` repository;
-the LaBraM implementation lives in this `LaBraM` repository. The two execution
-paths are intentionally separate.
+This is the canonical scientific plan for a two-manuscript program. The TMLR
+interaction-aligned study and the ICASSP CBraMod depth study have separate
+questions, repositories, methods, result registries, and claims.
+
+## Active execution priority
+
+Only TMLR is active now. The LaBraM/TUEV operational closure is complete under
+the existing three-seed registry. The next step is to create a clean clone of
+the original CBraMod repository and begin its TMLR block with FACED. Do not
+create new scripts or launch CBraMod jobs until the clone, provenance contract,
+native-branch audit, and common-adapter design gate are recorded. The
+parameter-matched axis-blind control and final cross-backbone aggregation remain
+later TMLR closure gates; they do not justify duplicate TUEV runs. ICASSP is
+retained as a deferred boundary and is not an active workstream.
 
 ## 1. Non-negotiable repository boundary
 
 | Backbone | Repository | Active branch | Current HEAD | Paper-grade rule |
 | --- | --- | --- | --- | --- |
-| CBraMod | `/data/neurogroup/mingyangjiang/EEGxPlore/EEGxPlore` | `SEED-V` | `861c222` | Run CBraMod only here. |
-| LaBraM | `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM` | `adaptor` | `973b61f` | Run LaBraM only here. |
+| CBraMod, TMLR | `/data/neurogroup/mingyangjiang/EEGxPlore/CBraMod` | `main` | `0ff6be9` plus the current adapter worktree | Build the CBraMod-specific interaction-aligned adapter here; do not use EEGxPlore. |
+| CBraMod, ICASSP | `/data/neurogroup/mingyangjiang/EEGxPlore/EEGxPlore` | `SEED-V` | `861c222` | Depth probing/fusion only; CBraMod only. |
+| LaBraM | `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM` | `adaptor` | `2e5840c` at this update | Run LaBraM only here. |
 
 The LaBraM import/substitution path under `EEGxPlore/EEGxPlore/models/labram_backbone.py`
-is a historical engineering path. It must not be used for the revised
-paper's LaBraM experiments. Existing results from that path remain historical
+is a historical engineering path. It must not be used for either manuscript's
+new LaBraM/TMLR evidence. Existing results from that path remain historical
 and are not silently deleted or relabeled.
 
 `LaBraM-depth` is an isolated historical/depth worktree, not a third active
 backbone repository.
+
+### 1.1 Manuscript separation override
+
+TMLR is **Interaction-Aligned Adaptation for EEG Foundation Models** (fallback:
+**When Does Interaction-Aligned Adaptation Help EEG Foundation Models?**). It
+tests one common low-rank residual primitive, `Down -> native-axis mixer ->
+Up`, on eligible native interaction axes of CBraMod and LaBraM. The realized
+axis must be semantically defined and have sequence length greater than one.
+LaBraM uses channel/patch branches over `[B,C,S,D]`; CBraMod preserves its
+native spatial/channel and temporal/spectral branch separation and
+recombination. The TMLR CBraMod implementation must be developed in the new
+clean clone of original CBraMod, not in EEGxPlore.
+
+TMLR requires frozen-plus-head, full fine-tuning, upper-block, independent
+LoRA, generic bottleneck, parameter-matched axis-blind, and native
+channel-only/patch-only/channel-plus-patch controls. It uses exactly three
+final seeds `{42,1024,3407}`, validation-selected test evaluation, BA and
+macro-F1 as primary metrics, and parameter/efficiency plus residual, alpha,
+gradient, and update diagnostics. LoRA is a separate generic PEFT method; it
+must not be combined with the native-axis adapter. Depth aggregation, depth
+routing, typed specialist MoE, compact EEG/PSD routers, and the historical
+depth-aware model are excluded from TMLR.
+
+ICASSP is **Depth Probing and Fusion in Pretrained EEG Encoders** (fallback:
+**When Do Earlier CBraMod Layers Improve Downstream EEG Decoding?**). It stays
+in EEGxPlore and uses CBraMod only, with frozen or nearly frozen backbone
+probes/fusion at prespecified depths. It owns final-layer probes,
+individual-layer probes, uniform fusion, learned global depth weights, and an
+interpretable compact sample-conditioned probe if used. It owns depth weights,
+entropy, earlier-layer mass, seed consistency, class-conditioned weights,
+per-class metrics, depth-removal interventions, and efficiency diagnostics.
+This design is deferred until the TMLR cross-backbone matrix is locked.
+
+ICASSP must not include LaBraM, the TMLR interaction-aligned adapter, TMLR
+channel/patch eligibility, the TMLR low-rank operator, LoRA-vs-aligned or
+axis-blind comparisons, or TMLR tables/figures. Complete and lock TMLR first,
+then execute ICASSP separately. Loaders/checkpoints may be shared when
+necessary, but no numerical results, trained model families, figures, tables,
+manuscript text, primary analyses, or central conclusions may be reused across
+the two papers. Historical NeurIPS material remains context only.
 
 ## 2. Paper identity and research question
 
@@ -58,8 +109,9 @@ and upper-layer-only fine-tuning across CBraMod and LaBraM.
 
 ### Negative/diagnostic hypothesis
 
-Explicit upper-depth aggregation does not consistently improve a simpler
-interaction-aligned adapter under the evaluated settings.
+The TMLR alignment test is the native-axis versus parameter-matched
+axis-blind comparison. Depth probing and depth aggregation are not TMLR
+conditions; they belong exclusively to the separate ICASSP CBraMod study.
 
 ### Nonclaims
 
@@ -149,7 +201,7 @@ eligible and temporal patch interaction is degenerate. ISRUC has six channels
 and 30 temporal patches per epoch, so both axes are eligible. FACED has 32
 channels and 10 patches in the validated LaBraM contract.
 
-### CBraMod
+### CBraMod (historical EEGxPlore implementation; ICASSP audit)
 
 Verified in `EEGxPlore/EEGxPlore/models/cbramod.py` and
 `models/criss_cross_transformer.py`:
@@ -219,8 +271,8 @@ Every backbone/dataset pair must register:
 5. generic bottleneck adapter;
 6. parameter-matched axis-blind residual adapter;
 7. interaction-aligned adapter;
-8. interaction-aligned plus one prespecified depth extension;
-9. channel-off, patch-off, and both-off ablations where axes are eligible.
+8. channel-off, patch-off, and both-off ablations where axes are eligible;
+9. eligibility-mask and realized-geometry diagnostics.
 
 Current gaps:
 
@@ -229,9 +281,12 @@ Current gaps:
   now implemented and smoke-tested; their ISRUC multiseed results remain to be
   collected. Parameter-matched axis-blind controls are still a later budgeted
   refinement, not silently conflated with the generic control.
-- EEGxPlore CBraMod: frozen/full/AttnRes/MoE pathways exist; LoRA and generic
-  bottleneck baselines are absent or incomplete and must be added without
-  importing the LaBraM implementation.
+- CBraMod TMLR clone: must repeat the checkpoint, geometry, native-branch, and
+  preprocessing audit from the original CBraMod source before implementing
+  TMLR controls. Do not transfer the EEGxPlore AttnRes/MoE/depth/router path.
+- EEGxPlore CBraMod: remains the ICASSP depth-probing/fusion repository; its
+  TMLR LoRA, generic, axis-blind, and aligned controls must not be added to the
+  ICASSP result registry.
 - Neither repository currently has a single cross-backbone result registry,
   parameter-budget checker, or final paired statistical aggregation contract.
 
@@ -241,9 +296,9 @@ A baseline is not called “matched” until trainable parameter counts are with
 ## 9. Fairness and test governance
 
 Development uses validation only, equal search budgets, fixed method families,
-and development seeds `42,1024,3407` where the dataset supports them. After
-method and protocol freeze, predeclare two additional final seeds and use the
-same five seeds for all primary methods.
+and the fixed three-seed packet `42,1024,3407` where the dataset supports it.
+The same three seeds are the multiseed results and the locked final test
+results; no five-seed confirmation block is part of this project.
 
 The primary checkpoint selector is validation Cohen's kappa for continuity with
 the current LaBraM contract; the final paper should confirm a class-balanced
@@ -285,16 +340,16 @@ Backbone × dataset
 │       ├── patch-off
 │       └── eligible axes together
 ├── 3. Mechanism section
-│   ├── one prespecified depth extension
 │   ├── realized [C,S,D] and gradient/ratio diagnostics
-│   └── stop if depth or extra routing does not pass the aligned gate
+│   ├── channel-off, patch-off, and both-off interventions
+│   └── stop if an axis is ineligible or the matched alignment gate fails
 ├── 4. Promotion gate
 │   ├── stop single-seed tuning when the run ladder is complete
 │   ├── lock method/config from validation
 │   └── run development seeds 42, 1024, 3407
 └── 5. Final section
     ├── freeze protocol and method
-    ├── run the five-seed primary block
+    ├── run the locked three-seed primary block
     └── evaluate test only after validation selection is frozen
 ```
 
@@ -319,30 +374,95 @@ resolve data provenance before broad training.
    patch-only, and depth are mechanism ablations.
 3. **FACED:** rerun dense and the frozen common primitive under the final
    protocol; preserve historical patch/alpha pilots as archive evidence.
-4. **TUEV:** establish preprocessing, class support, and dense baseline before
-   any adapter comparison; then run the same registry.
+4. **TUEV:** operationally closed with the complete 11-condition x three-seed
+   registry. Retain its mixed/negative native-adapter result as a boundary
+   case and do not launch duplicate tuning.
 5. **PhysioNet-MI:** proceed only after its preprocessing and subject split
    contract is verified.
 
-### Phase 2: finish the CBraMod repository
+### Phase 2: finish the dedicated CBraMod TMLR repository
 
-Run CBraMod only in `EEGxPlore/EEGxPlore`:
+Run the CBraMod TMLR matrix only in the new clean clone of the original
+CBraMod repository:
 
-1. SEED-V trust audit and mechanism decomposition: frozen/full/upper-k, simple
-   AttnRes, axis-aligned primitive, axis-blind and generic controls; compare
-   dispatch and router settings only as diagnostic ablations.
-2. Freeze the simplest stable CBraMod method or invoke the empirical-study
-   fallback if generic PEFT matches it.
-3. Confirm on FACED, ISRUC, TUEV, and PhysioNet-MI using the frozen method.
-4. Run cross-backbone comparisons only after both repositories have completed
-   their baseline and aligned-method gates.
+1. audit preprocessing, native branch geometry, checkpoint loading, and
+   channel/temporal eligibility;
+2. implement the same high-level `Down -> native-axis mixer -> Up` family and
+   the frozen/full/upper-k, LoRA, generic, axis-blind, and aligned controls;
+3. confirm the locked protocol on the TMLR dataset matrix and collect the
+   three-seed summaries;
+4. do not import LaBraM code or use the EEGxPlore depth/router implementation.
 
-### Phase 3: final confirmation and mechanism study
+### CBraMod FACED adapter design gate (2026-07-31)
 
-Use five predeclared seeds for dense, LoRA, generic bottleneck,
-axis-blind, aligned, and aligned+depth on the primary dataset/backbone cells.
-Then run channel-off, patch-off, both-off, eligibility, within-subject versus
-subject-disjoint SEED-V, and depth diagnostics.
+The dedicated clone is verified at `/data/neurogroup/mingyangjiang/EEGxPlore/CBraMod`,
+remote `https://github.com/wjq-learning/CBraMod.git`, base commit `0ff6be9`.
+The first implementation uses one common TMLR primitive rather than a second
+backbone-specific method:
+
+```text
+z     = Down(LayerNorm(h_native))
+m     = native-axis attention mixer(z)
+delta = Up(m)
+h_out = h + alpha * gamma * delta
+```
+
+CBraMod's own `criss_cross_transformer.py` defines the native semantics. For
+`[B,C,S,D]`, the first `D/2` features are the spatial/channel branch and the
+second `D/2` features are the temporal/patch branch. The CBraMod adapter maps
+`channel` to the first half and mixes over `C`, maps `patch` to the second
+half and mixes over `S`, and enables both independent branches for
+`channel_patch`. It is attached once after the pretrained encoder, matching
+the LaBraM residual placement while leaving CBraMod's pretrained blocks and
+branch recombination untouched. It uses zero-initialized Up projections for
+exact dense parity, with separate alpha, residual, update, and Q/K/V
+diagnostics.
+
+The implementation is isolated in `CBraMod/models/interaction_adapter.py`,
+with checkpoint attachment in `models/cbramod.py`; it does not import LaBraM,
+EEGxPlore, depth aggregation, MoE, routing, or ICASSP code. The model-level
+tests in `tests/test_interaction_adapter.py` pass for dense parity, native
+geometry, gradients, and rejection of a degenerate patch axis.
+
+The next FACED order is deliberately a gate sequence, not an immediate
+multiseed launch:
+
+1. Build a clean CBraMod-only FACED runner with strict checkpoint-load and
+   artifact reporting. The legacy `finetune_main.py`/`finetune_trainer.py`
+   remains a reference implementation until that contract is frozen.
+2. Audit the local FACED LMDB at `/data/neurogroup/mingyangjiang/data/FACED`:
+   manifest, `[32,10,200]` geometry, `/100` scaling, subject split hashes,
+   nine labels, and finite samples.
+3. Run one seed-42 dense smoke and one seed-42 zero-init adapter parity/training
+   smoke using the same classifier head and optimizer contract.
+4. Lock the dense recipe from validation only, then screen native `channel`,
+   `patch`, and `channel_patch` on seed 42. Do not select using test results.
+5. Once the structure and recipe are fixed, run exactly `{42,1024,3407}` for
+   the retained matrix, including dense, frozen, native, generic, LoRA, and
+   upper-block controls. Axis-blind and final cross-backbone aggregation stay
+   as later TMLR closure gates.
+
+The CBraMod FACED result must therefore be interpreted as an instantiation of
+the same interaction-alignment rule, not as “CBraMod gets a different custom
+adapter.”
+
+### Phase 3: deferred ICASSP CBraMod depth study
+
+Only after the TMLR protocol and result registry are locked, return to
+`EEGxPlore/EEGxPlore` for the CBraMod-only ICASSP study. Run frozen/nearly
+frozen final-layer and prespecified-depth probes, uniform fusion, learned
+global depth fusion, and interpretable interventions. Do not add TMLR
+channel/patch adapters or generic-PEFT comparison cells to this repository's
+ICASSP result registry.
+
+### Phase 4: final TMLR confirmation and mechanism study
+
+Use the three predeclared seeds `42,1024,3407` for dense, LoRA, generic
+bottleneck, axis-blind, and aligned conditions on the primary TMLR
+dataset/backbone cells. Then run channel-off, patch-off, both-off, eligibility,
+and within-subject versus subject-disjoint SEED-V diagnostics. Depth
+diagnostics are reserved for ICASSP and must be tracked in its separate
+registry.
 
 ## 11. Main experiment matrix
 
@@ -353,9 +473,9 @@ subject-disjoint SEED-V, and depth diagnostics.
 | A | CBraMod, LaBraM | PhysioNet-MI | frozen, full | 3 development | data audit first |
 | B | CBraMod, LaBraM | same primary cells | upper-k, LoRA, generic bottleneck | 3 development | baseline registry complete |
 | C | CBraMod, LaBraM | same primary cells | axis-blind, aligned | 3 development | matched parameter budget |
-| D | CBraMod, LaBraM | same primary cells | aligned + depth | 3 development | secondary negative hypothesis |
-| E | CBraMod, LaBraM | frozen primary cells | all primary methods | 5 final | method/protocol frozen |
-| F | CBraMod, LaBraM | SEED-V and ISRUC first | channel/patch/eligibility/depth interventions | 3-5 | mechanism attribution |
+| D | CBraMod, LaBraM | same primary cells | alignment interventions and eligibility | 3 development | mechanism attribution |
+| E | CBraMod, LaBraM | frozen primary cells | all primary methods | 3 locked | method/protocol frozen |
+| F | CBraMod, LaBraM | SEED-V and ISRUC first | channel/patch/eligibility/depth interventions | 3 | mechanism attribution |
 
 ## 12. Mechanistic and efficiency analysis
 
@@ -373,19 +493,19 @@ practical under identical hardware, precision, batch size, and timing windows.
 
 ### Method-paper gate
 
-Require a positive mean aligned effect on both backbones, support on at least
-two primary datasets, stable seed behavior, a Pareto advantage over generic
-controls, a matched-budget aligned-versus-axis-blind effect, and a measured
-efficiency benefit.
+Require a matched-budget aligned-versus-axis-blind comparison, stable
+three-seed behavior, and evidence across both backbones before making a broad
+positive alignment claim. A positive aligned effect on every dataset is not
+required, but the manuscript must report mixed or negative cells honestly and
+must not promote a dataset-specific win to a universal claim. Efficiency,
+parameter, and residual-mechanism evidence are part of the gate.
 
 ### Empirical-study fallback
 
-If generic PEFT matches aligned adaptation, only one backbone benefits, effects
-are strongly dataset-specific, or upper-k fine-tuning explains the result,
-change the paper identity to:
+If generic PEFT matches aligned adaptation, only one backbone benefits, or
+effects are strongly dataset-specific, use the narrower TMLR identity:
 
-> When Does Structure-Aware PEFT Help EEG Foundation Models? A Controlled Study
-> Across CBraMod and LaBraM.
+> When Does Interaction-Aligned Adaptation Help EEG Foundation Models?
 
 Stop adding depth, routing, context, or new adapter branches when the simple
 aligned primitive has not passed the matched-baseline gate. Do not expand a
@@ -394,7 +514,9 @@ failed method across all datasets merely to increase table size.
 ## 14. Immediate next ten actions
 
 1. Treat this file as the canonical plan in both repositories.
-2. Keep all LaBraM runs in `LaBraM` and all CBraMod runs in `EEGxPlore/EEGxPlore`.
+2. Keep LaBraM TMLR runs in `LaBraM`, CBraMod TMLR runs in the dedicated
+   original-CBraMod clone, and CBraMod ICASSP depth runs in
+   `EEGxPlore/EEGxPlore`.
 3. Finish the LaBraM ISRUC data/protocol audit and dense baseline replication.
 4. Implement and parity-test the common low-rank axis residual primitive in
    LaBraM without changing dense common weights.
@@ -403,9 +525,11 @@ failed method across all datasets merely to increase table size.
 6. Freeze the LaBraM ISRUC method-development budget and run validation-only
    development seeds.
 7. Complete LaBraM TUEV and formal FACED baseline/adapter cells.
-8. Audit the CBraMod paper/code dispatch and result provenance in EEGxPlore.
-9. Implement CBraMod generic/LoRA/axis-blind controls without importing LaBraM.
-10. Freeze both backbone protocols before any five-seed final test block.
+8. Establish and audit the dedicated original-CBraMod clone for TMLR.
+9. Implement the CBraMod TMLR generic/LoRA/axis-blind/aligned controls without
+   importing LaBraM or using EEGxPlore's depth/router path.
+10. After TMLR is locked, run the separate CBraMod-only ICASSP depth-probe
+    and fusion study in EEGxPlore.
 
 ## 15. Human approval questions
 
@@ -413,8 +537,8 @@ failed method across all datasets merely to increase table size.
   the three shared datasets and SEED-V mechanism study?
 - Should final checkpoint selection remain validation kappa, or change to a
   prespecified class-balanced metric such as balanced accuracy?
-- What two additional final seeds should be added to the existing development
-  packet `42,1024,3407`?
+- Are all TMLR repository paths, commits, and experiment ownership entries
+  recorded before the dedicated CBraMod clone is used?
 - Is the existing SEED-V within-subject protocol acceptable as a reproducibility
   result if the subject-disjoint evaluation is reported separately?
 - Should the current CBraMod AttnRes/MoE results be presented only as historical

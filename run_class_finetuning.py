@@ -164,6 +164,8 @@ def get_args():
                         help='Initial scalar for each enabled adapter branch.')
     parser.add_argument('--labram_adapter_gamma', default=1.0, type=float,
                         help='Scalar multiplier on the residual adapter correction.')
+    parser.add_argument('--labram_adapter_zero_init_output', action='store_true', default=False,
+                        help='Zero-initialize native adapter output projections so the initial branch is identity-like.')
     parser.add_argument('--labram_adapter_lr_scale', default=1.0, type=float,
                         help='Multiplier on the effective LR for native_axis_adapter parameters.')
     parser.add_argument('--labram_adapter_alpha_lr_scale', default=None, type=float,
@@ -332,7 +334,7 @@ def get_args():
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
     parser.add_argument('--dataset', default='TUAB', type=str,
-                        help='dataset: TUAB | TUEV | SEED-V | FACED | ISRUC')
+                        help='dataset: TUAB | TUEV | SEED-V | FACED | ISRUC | PhysioNet-MI')
     parser.add_argument('--data_path', default='',
                         help='path to the preprocessed TUAB/TUEV dataset root')
     parser.add_argument('--seedv_channel_manifest', default='',
@@ -381,6 +383,7 @@ def get_models(args):
         adapter_patch_output_dropout=args.labram_adapter_patch_output_dropout,
         adapter_init_alpha=args.labram_adapter_init_alpha,
         adapter_gamma=args.labram_adapter_gamma,
+        adapter_zero_init_output=args.labram_adapter_zero_init_output,
         adapter_seed=args.labram_adapter_seed,
         adapter_use_token_mlp=args.labram_adapter_use_token_mlp,
         adapter_depth_mode=args.labram_adapter_depth_mode,
@@ -440,9 +443,13 @@ def get_dataset(args):
         metrics = ["pr_auc", "roc_auc", "accuracy", "balanced_accuracy"]
     elif dataset_name == 'TUEV':
         train_dataset, test_dataset, val_dataset = utils.prepare_TUEV_dataset(args.data_path)
-        # Follow the existing ACCRE-preprocessed 16-channel bipolar montage, not the
-        # original hardcoded 23-channel TUEV assumption.
-        ch_names = list(utils.TUEV_BIPOLAR_16_CH)
+        # The stored rows are bipolar derivations. The pretrained LaBraM
+        # checkpoint has positional slots only for the first 128 standard
+        # positions, while the final eight bipolar names are not valid
+        # checkpoint indices. Preserve the serialized row order and use the
+        # model's deterministic sequential slots 1..16 instead of silently
+        # mapping bipolar names to unrelated scalp positions.
+        ch_names = None
         args.nb_classes = 6
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
     elif dataset_name in {'SEED-V', 'SEEDV'}:
@@ -490,8 +497,24 @@ def get_dataset(args):
         args.nb_classes = 5
         args.input_size = 6000
         metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
+    elif dataset_name in {'PHYSIONET-MI', 'PHYSIONETMI'}:
+        train_dataset, test_dataset, val_dataset = utils.prepare_PhysioNet_MI_dataset(args.data_path)
+        ch_names = list(utils.PHYSIONET_MI_LABRAM_CH)
+        if len(ch_names) != 64:
+            raise RuntimeError(
+                f"PhysioNet-MI LaBraM protocol requires 64 channels, found {len(ch_names)}."
+            )
+        input_chans = utils.get_input_chans(ch_names)
+        if input_chans[0] != 0 or len(input_chans[1:]) != 64 or len(set(input_chans[1:])) != 64:
+            raise RuntimeError("PhysioNet-MI channel mapping must contain CLS slot 0 plus 64 unique electrodes.")
+        print(f"Loaded PhysioNet-MI channel manifest with {len(ch_names)} channels.")
+        args.nb_classes = 4
+        metrics = ["accuracy", "balanced_accuracy", "cohen_kappa", "f1_weighted"]
     else:
-        raise ValueError(f"Unsupported dataset '{args.dataset}'. Expected one of: TUAB, TUEV, SEED-V, FACED, ISRUC")
+        raise ValueError(
+            f"Unsupported dataset '{args.dataset}'. Expected one of: "
+            "TUAB, TUEV, SEED-V, FACED, ISRUC, PhysioNet-MI"
+        )
     return train_dataset, test_dataset, val_dataset, ch_names, metrics
 
 
@@ -864,8 +887,26 @@ def main(args, ds_init):
             cwd=Path(__file__).resolve().parent,
             text=True,
         ).strip()
+        git_status = subprocess.check_output(
+            ['git', 'status', '--short'],
+            cwd=Path(__file__).resolve().parent,
+            text=True,
+        ).splitlines()
+        git_diff_sha256 = hashlib.sha256(
+            subprocess.check_output(
+                ['git', 'diff', '--binary'],
+                cwd=Path(__file__).resolve().parent,
+            )
+        ).hexdigest()
     except (OSError, subprocess.CalledProcessError):
         git_commit = 'unknown'
+        git_status = []
+        git_diff_sha256 = None
+    dataset_channel_names = (
+        list(utils.TUEV_BIPOLAR_16_CH)
+        if str(args.dataset).upper().replace('_', '-') == 'TUEV'
+        else ch_names
+    )
     channel_manifest_sha256 = None
     channel_manifest_file_sha256 = _sha256_file(args.seedv_channel_manifest)
     checkpoint_sha256 = _sha256_file(args.finetune)
@@ -875,6 +916,10 @@ def main(args, ds_init):
             json.dumps(ch_names, ensure_ascii=True, separators=(',', ':')).encode('utf-8')
         ).hexdigest()
         input_chans = utils.get_input_chans(ch_names)
+    elif dataset_channel_names is not None:
+        channel_manifest_sha256 = hashlib.sha256(
+            json.dumps(dataset_channel_names, ensure_ascii=True, separators=(',', ':')).encode('utf-8')
+        ).hexdigest()
     split_metadata = {}
     if str(args.dataset).upper().replace('_', '-') in {'SEED-V', 'SEEDV'}:
         for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
@@ -884,24 +929,49 @@ def main(args, ds_init):
         for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
             if hasattr(dataset, 'split_metadata'):
                 split_metadata[split_name] = dataset.split_metadata()
+    if str(args.dataset).upper().replace('_', '-') in {'PHYSIONET-MI', 'PHYSIONETMI'}:
+        for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
+            if hasattr(dataset, 'split_metadata'):
+                split_metadata[split_name] = dataset.split_metadata()
+    if str(args.dataset).upper().replace('_', '-') == 'TUEV':
+        for split_name, dataset in (('train', dataset_train), ('val', dataset_val), ('test', dataset_test)):
+            if hasattr(dataset, 'split_metadata'):
+                split_metadata[split_name] = dataset.split_metadata()
     run_config = {
         'dataset': str(args.dataset),
+        'model': str(args.model),
         'data_path': os.path.abspath(args.data_path) if args.data_path else '',
         'input_scale_divisor': float(args.input_scale_divisor),
         'strict_checkpoint_load': bool(args.strict_checkpoint_load),
         'checkpoint_load_report': checkpoint_load_report,
         'seedv_channel_manifest': os.path.abspath(args.seedv_channel_manifest) if args.seedv_channel_manifest else '',
-        'channel_names': ch_names,
+        'channel_names': dataset_channel_names,
         'input_chans': input_chans,
+        'input_position_policy': (
+            'sequential_pos_embed_slots_1_to_16'
+            if str(args.dataset).upper().replace('_', '-') == 'TUEV'
+            else 'manifest_lookup'
+        ),
         'channel_manifest_file_sha256': channel_manifest_file_sha256,
         'pretrained_checkpoint': os.path.abspath(args.finetune) if args.finetune else '',
         'pretrained_checkpoint_sha256': checkpoint_sha256,
+        'git_commit': git_commit,
+        'git_dirty': bool(git_status),
+        'git_status': git_status,
+        'git_diff_sha256': git_diff_sha256,
         'dataset_split_metadata': split_metadata,
         'isruc_bipolar_channels': list(utils.ISRUC_BIPOLAR_CH) if str(args.dataset).upper().replace('_', '-') == 'ISRUC' else None,
         'requested_lr_string': args.requested_lr_string or str(args.lr),
         'parsed_args_lr': float(args.lr),
         'max_scheduled_lr': max_scheduled_lr,
+        'optimizer': str(args.opt),
+        'batch_size': int(args.batch_size),
+        'epochs': int(args.epochs),
+        'update_freq': int(args.update_freq),
+        'num_workers': int(args.num_workers),
+        'clip_grad': None if args.clip_grad is None else float(args.clip_grad),
         'warmup_epochs': int(args.warmup_epochs),
+        'save_ckpt_freq': int(args.save_ckpt_freq),
         'seed': int(args.seed),
         'backbone_mode': args.labram_backbone_mode,
         'backbone_frozen': bool(args.labram_backbone_mode in {'frozen', 'lora'}),
@@ -942,6 +1012,7 @@ def main(args, ds_init):
         'adapter_heads': int(args.labram_adapter_heads),
         'adapter_dropout': float(args.labram_adapter_dropout),
         'adapter_gamma': float(args.labram_adapter_gamma),
+        'adapter_zero_init_output': bool(args.labram_adapter_zero_init_output),
         'adapter_init_alpha': float(args.labram_adapter_init_alpha),
         'adapter_parameter_count': int(adapter_parameter_count),
         'lora_parameter_count': int(lora_parameter_count),

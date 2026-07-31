@@ -58,6 +58,7 @@ STRICT_CHECKPOINT_LOAD="${STRICT_CHECKPOINT_LOAD:-1}"
 SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-0}"
 FINETUNE_CHECKPOINT="${FINETUNE_CHECKPOINT:-./checkpoints/labram-base.pth}"
 EVAL_VALIDATION_ONLY="${EVAL_VALIDATION_ONLY:-0}"
+FROZEN_BACKBONE_EVAL_MODE="${FROZEN_BACKBONE_EVAL_MODE:-0}"
 
 if ! awk -v lr="$LR" 'BEGIN { exit !(lr + 0 > 0) }'; then
   echo "LR must be a positive numeric value; got: $LR" >&2
@@ -94,7 +95,7 @@ print("gpu count:", torch.cuda.device_count())
 print("lmdb:", lmdb.__file__)
 PY
 nvidia-smi || true
-echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE ADAPTER_CORE_LR_SCALE=$LABRAM_ADAPTER_LR_SCALE ALPHA_LR_SCALE=$LABRAM_ADAPTER_ALPHA_LR_SCALE FIXED_ALPHA=${LABRAM_ADAPTER_FIXED_ALPHA:-learned} ADAPTER_WD=${LABRAM_ADAPTER_WEIGHT_DECAY:-inherit} SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
+echo "FACED LaBraM launch: BATCH_SIZE=$BATCH_SIZE NUM_WORKERS=$NUM_WORKERS LR=$LR WD=$WEIGHT_DECAY EPOCHS=$EPOCHS ADAPTER=$LABRAM_ADAPTER_TYPE ADAPTER_CORE_LR_SCALE=$LABRAM_ADAPTER_LR_SCALE ALPHA_LR_SCALE=$LABRAM_ADAPTER_ALPHA_LR_SCALE FIXED_ALPHA=${LABRAM_ADAPTER_FIXED_ALPHA:-learned} ADAPTER_WD=${LABRAM_ADAPTER_WEIGHT_DECAY:-inherit} FROZEN_BACKBONE_EVAL_MODE=$FROZEN_BACKBONE_EVAL_MODE SKIP_FINAL_TEST=$SKIP_FINAL_TEST" >&2
 echo "git_commit: $(git rev-parse HEAD)" >&2
 if [[ -f ./checkpoints/labram-base.pth ]]; then
   echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
@@ -123,6 +124,9 @@ fi
 if [[ "$DETERMINISTIC" == "1" ]]; then
   export CUBLAS_WORKSPACE_CONFIG=":4096:8"
   PYTHON_ARGS+=(--deterministic)
+fi
+if [[ "$FROZEN_BACKBONE_EVAL_MODE" == "1" ]]; then
+  PYTHON_ARGS+=(--frozen_backbone_eval_mode)
 fi
 if [[ "$STRICT_CHECKPOINT_LOAD" == "1" ]]; then
   PYTHON_ARGS+=(--strict_checkpoint_load)
