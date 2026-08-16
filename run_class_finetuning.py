@@ -206,6 +206,10 @@ def get_args():
                         help='Number of final blocks summarized for --labram_adapter_depth_mode lastk_delta.')
     parser.add_argument('--labram_adapter_gamma_zero_skip_branch', action='store_true', default=False,
                         help='If gamma is zero, return dense features before computing the adapter branch.')
+    parser.add_argument('--experiment_method', default='', type=str,
+                        help='Registry method label recorded in run_config (e.g. axis_blind).')
+    parser.add_argument('--target_adapter_params', default=None, type=int,
+                        help='Capacity target used by a parameter-matched control.')
 
     parser.add_argument('--input_size', default=200, type=int,
                         help='EEG input size')
@@ -314,6 +318,10 @@ def get_args():
                         help='Perform evaluation only')
     parser.add_argument('--eval_selected_checkpoints', action='store_true',
                         help='Evaluate checkpoint-best.pth and checkpoint-best-ba.pth in an existing output directory without retraining.')
+    parser.add_argument('--eval_all_checkpoints', action='store_true',
+                        help='Evaluate every numeric checkpoint-<epoch>.pth in an existing output directory without retraining.')
+    parser.add_argument('--all_checkpoint_eval_output', default='', type=str,
+                        help='JSONL destination for --eval_all_checkpoints; defaults to output_dir/all_epoch_test_metrics.jsonl.')
     parser.add_argument('--eval_validation_only', action='store_true', default=False,
                         help='Evaluate the validation split only, without test evaluation or training.')
     parser.add_argument('--dist_eval', action='store_true', default=False,
@@ -757,6 +765,25 @@ def main(args, ds_init):
             assert adapter_trainable > 0
     if args.frozen_backbone_eval_mode and args.labram_backbone_mode != 'frozen':
         raise ValueError('--frozen_backbone_eval_mode requires --labram_backbone_mode frozen')
+    if args.experiment_method == 'axis_blind':
+        if args.labram_backbone_mode != 'frozen' or args.labram_adapter_type != 'generic':
+            raise ValueError('axis_blind requires frozen backbone plus generic adapter')
+        if args.target_adapter_params is None:
+            raise ValueError('axis_blind requires --target_adapter_params')
+        adapter_module = model.native_axis_adapter
+        actual_adapter_params = sum(p.numel() for p in adapter_module.parameters())
+        relative_error = abs(actual_adapter_params - args.target_adapter_params) / max(
+            1, args.target_adapter_params
+        )
+        if relative_error > 0.05:
+            raise ValueError(
+                f'axis_blind adapter count mismatch: actual={actual_adapter_params} '
+                f'target={args.target_adapter_params} relative_error={relative_error:.6f}'
+            )
+        if hasattr(adapter_module, 'channel_attn') or hasattr(adapter_module, 'patch_attn'):
+            raise ValueError('axis_blind must not instantiate channel or patch attention')
+        if not hasattr(adapter_module, 'token_mlp'):
+            raise ValueError('axis_blind requires the token MLP residual branch')
 
     model.to(device)
 
@@ -940,6 +967,10 @@ def main(args, ds_init):
     run_config = {
         'dataset': str(args.dataset),
         'model': str(args.model),
+        'experiment_method': str(args.experiment_method),
+        'target_adapter_params': (
+            None if args.target_adapter_params is None else int(args.target_adapter_params)
+        ),
         'data_path': os.path.abspath(args.data_path) if args.data_path else '',
         'input_scale_divisor': float(args.input_scale_divisor),
         'strict_checkpoint_load': bool(args.strict_checkpoint_load),
@@ -1043,7 +1074,7 @@ def main(args, ds_init):
         'output_dir': os.path.abspath(args.output_dir) if args.output_dir else '',
     }
     print('Run contract: ' + json.dumps(run_config, sort_keys=True), flush=True)
-    if args.output_dir and utils.is_main_process() and not args.eval_selected_checkpoints:
+    if args.output_dir and utils.is_main_process() and not (args.eval_selected_checkpoints or args.eval_all_checkpoints):
         with open(os.path.join(args.output_dir, 'run_config.json'), 'w', encoding='utf-8') as f:
             json.dump(run_config, f, indent=2)
 
@@ -1059,6 +1090,84 @@ def main(args, ds_init):
     utils.auto_load_model(
         args=args, model=model, model_without_ddp=model_without_ddp,
         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
+
+    if args.eval_all_checkpoints:
+        if data_loader_test is None or data_loader_val is None:
+            raise ValueError('All-checkpoint evaluation requires validation and test dataloaders.')
+
+        val_loaders = data_loader_val if isinstance(data_loader_val, list) else [data_loader_val]
+        test_loaders = data_loader_test if isinstance(data_loader_test, list) else [data_loader_test]
+
+        def _mean_all_epoch_stat(stats_list, key):
+            values = [item[key] for item in stats_list if key in item]
+            if not values:
+                raise KeyError(f'Missing evaluation statistic: {key}')
+            first = values[0]
+            if isinstance(first, (list, tuple, np.ndarray)):
+                return np.asarray(values, dtype=np.float64).mean(axis=0).tolist()
+            return float(np.mean(values))
+
+        checkpoint_paths = []
+        for checkpoint_path in Path(args.output_dir).glob('checkpoint-*.pth'):
+            suffix = checkpoint_path.stem.rsplit('-', 1)[-1]
+            if suffix.isdigit():
+                checkpoint_paths.append((int(suffix), checkpoint_path))
+        checkpoint_paths.sort(key=lambda item: item[0])
+        if not checkpoint_paths:
+            raise FileNotFoundError(
+                f'No numeric checkpoint-<epoch>.pth files found in {args.output_dir}'
+            )
+
+        output_path = args.all_checkpoint_eval_output or os.path.join(
+            args.output_dir, 'all_epoch_test_metrics.jsonl')
+        output_path = os.path.abspath(output_path)
+        if utils.is_main_process():
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, 'w', encoding='utf-8') as output_file:
+                for epoch, checkpoint_path in checkpoint_paths:
+                    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+                    model_without_ddp.load_state_dict(checkpoint['model'])
+                    val_stats_list = [
+                        evaluate(
+                            loader, model, device, header=f'epoch {epoch} val:',
+                            ch_names=ch_names, metrics=metrics,
+                            is_binary=args.nb_classes == 1,
+                            input_scale_divisor=args.input_scale_divisor,
+                        )
+                        for loader in val_loaders
+                    ]
+                    test_stats_list = [
+                        evaluate(
+                            loader, model, device, header=f'epoch {epoch} test:',
+                            ch_names=ch_names, metrics=metrics,
+                            is_binary=args.nb_classes == 1,
+                            input_scale_divisor=args.input_scale_divisor,
+                        )
+                        for loader in test_loaders
+                    ]
+                    record = {
+                        'epoch': epoch,
+                        'checkpoint': checkpoint_path.name,
+                        'validation': {
+                            key: _mean_all_epoch_stat(val_stats_list, key)
+                            for key in val_stats_list[0]
+                        },
+                        'test': {
+                            key: _mean_all_epoch_stat(test_stats_list, key)
+                            for key in test_stats_list[0]
+                        },
+                    }
+                    output_file.write(json.dumps(record) + '\n')
+                    output_file.flush()
+                    print(
+                        f'All-checkpoint epoch {epoch}: '
+                        f"val_kappa={record['validation'].get('cohen_kappa', float('nan')):.5f}, "
+                        f"test_ba={record['test'].get('balanced_accuracy', float('nan')):.5f}, "
+                        f"test_kappa={record['test'].get('cohen_kappa', float('nan')):.5f}",
+                        flush=True,
+                    )
+            print(f'Wrote all-checkpoint evaluation to {output_path}', flush=True)
+        exit(0)
 
     if args.eval_selected_checkpoints:
         if data_loader_test is None or data_loader_val is None:

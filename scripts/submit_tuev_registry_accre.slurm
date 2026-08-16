@@ -3,7 +3,7 @@
 #
 # This launcher is deliberately separate from the current LR sweep launcher:
 # the sweep selects LR on seed 42 first. After LR is locked, this script runs
-# the same 25-epoch TUEV contract for dense, frozen, native-axis, and generic
+# the same 15-epoch TUEV contract for dense, frozen, native-axis, and generic
 # comparator conditions. It never mixes CBraMod/EEGxPlore code.
 #
 # METHOD values:
@@ -36,12 +36,12 @@ METHOD="${METHOD:-full_dense}"
 SEED="${SEED:-42}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
-EPOCHS="${EPOCHS:-25}"
+EPOCHS="${EPOCHS:-15}"
 LR="${LR:-5e-4}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.05}"
 LAYER_DECAY="${LAYER_DECAY:-0.65}"
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-5}"
-DROP_PATH="${DROP_PATH:-0.1}"
+DROP_PATH="${DROP_PATH:-0.2}"
 SMOOTHING="${SMOOTHING:-0.1}"
 INPUT_SCALE_DIVISOR="${INPUT_SCALE_DIVISOR:-100.0}"
 SAVE_CKPT_FREQ="${SAVE_CKPT_FREQ:-5}"
@@ -202,6 +202,12 @@ if method == 'axis_blind':
     actual = sum(p.numel() for p in model.native_axis_adapter.parameters())
     relative_error = abs(actual - target) / max(1, target)
     assert relative_error <= 0.05, (actual, target, relative_error)
+    # Axis-blind is a capacity-matched token MLP control.  Make the
+    # exclusion of native channel/patch interactions executable rather than
+    # relying on the adapter_type string alone.
+    assert not hasattr(model.native_axis_adapter, 'channel_attn')
+    assert not hasattr(model.native_axis_adapter, 'patch_attn')
+    assert hasattr(model.native_axis_adapter, 'token_mlp')
 print('python:', sys.executable)
 print('torch:', torch.__version__)
 print('TUEV registry preflight:', {
@@ -246,8 +252,12 @@ PYTHON_ARGS=(
   --disable_rel_pos_bias --abs_pos_emb --disable_qkv_bias
   --save_ckpt_freq "$SAVE_CKPT_FREQ"
   --seed "$SEED"
+  --experiment_method "$METHOD"
   --strict_checkpoint_load --no_auto_resume
 )
+if [[ -n "$TARGET_ADAPTER_PARAMS" ]]; then
+  PYTHON_ARGS+=(--target_adapter_params "$TARGET_ADAPTER_PARAMS")
+fi
 if [[ "$ADAPTER_ZERO_INIT_OUTPUT" == 1 ]]; then
   PYTHON_ARGS+=(--labram_adapter_zero_init_output)
 fi

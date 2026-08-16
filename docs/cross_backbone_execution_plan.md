@@ -1,6 +1,6 @@
 # Interaction-Aligned Adaptation: Canonical Cross-Backbone Execution Plan
 
-Last updated: 2026-07-31
+Last updated: 2026-08-02
 
 This is the canonical scientific plan for a two-manuscript program. The TMLR
 interaction-aligned study and the ICASSP CBraMod depth study have separate
@@ -9,19 +9,16 @@ questions, repositories, methods, result registries, and claims.
 ## Active execution priority
 
 Only TMLR is active now. The LaBraM/TUEV operational closure is complete under
-the existing three-seed registry. The next step is to create a clean clone of
-the original CBraMod repository and begin its TMLR block with FACED. Do not
-create new scripts or launch CBraMod jobs until the clone, provenance contract,
-native-branch audit, and common-adapter design gate are recorded. The
-parameter-matched axis-blind control and final cross-backbone aggregation remain
-later TMLR closure gates; they do not justify duplicate TUEV runs. ICASSP is
-retained as a deferred boundary and is not an active workstream.
+the existing three-seed registry. The clean original-CBraMod clone has passed
+its FACED provenance, checkpoint, geometry, and native-branch gates. FACED is
+now in the controlled comparison stage. ICASSP remains deferred and is not an
+active workstream.
 
 ## 1. Non-negotiable repository boundary
 
 | Backbone | Repository | Active branch | Current HEAD | Paper-grade rule |
 | --- | --- | --- | --- | --- |
-| CBraMod, TMLR | `/data/neurogroup/mingyangjiang/EEGxPlore/CBraMod` | `main` | `0ff6be9` plus the current adapter worktree | Build the CBraMod-specific interaction-aligned adapter here; do not use EEGxPlore. |
+| CBraMod, TMLR | `/data/neurogroup/mingyangjiang/EEGxPlore/CBraMod` | `main` | `f5a9668` | Build and evaluate the CBraMod-specific instantiation here; do not use EEGxPlore. |
 | CBraMod, ICASSP | `/data/neurogroup/mingyangjiang/EEGxPlore/EEGxPlore` | `SEED-V` | `861c222` | Depth probing/fusion only; CBraMod only. |
 | LaBraM | `/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM` | `adaptor` | `2e5840c` at this update | Run LaBraM only here. |
 
@@ -46,8 +43,10 @@ recombination. The TMLR CBraMod implementation must be developed in the new
 clean clone of original CBraMod, not in EEGxPlore.
 
 TMLR requires frozen-plus-head, full fine-tuning, upper-block, independent
-LoRA, generic bottleneck, parameter-matched axis-blind, and native
-channel-only/patch-only/channel-plus-patch controls. It uses exactly three
+LoRA, generic bottleneck, parameter-matched axis-blind, native frozen
+channel-only/patch-only/channel-plus-patch controls, and native
+full-backbone-plus-adapter channel-only/patch-only/channel-plus-patch controls.
+It uses exactly three
 final seeds `{42,1024,3407}`, validation-selected test evaluation, BA and
 macro-F1 as primary metrics, and parameter/efficiency plus residual, alpha,
 gradient, and update diagnostics. LoRA is a separate generic PEFT method; it
@@ -281,9 +280,13 @@ Current gaps:
   now implemented and smoke-tested; their ISRUC multiseed results remain to be
   collected. Parameter-matched axis-blind controls are still a later budgeted
   refinement, not silently conflated with the generic control.
-- CBraMod TMLR clone: must repeat the checkpoint, geometry, native-branch, and
-  preprocessing audit from the original CBraMod source before implementing
-  TMLR controls. Do not transfer the EEGxPlore AttnRes/MoE/depth/router path.
+- CBraMod TMLR clone: the checkpoint, geometry, native-branch, and preprocessing
+  audit is verified for FACED. Dense three-seed confirmation and seed-42
+  comparison screens are complete. The native full-backbone-plus-adapter mode
+  is implemented as `native_full_finetune`; its construction gate and seed-42
+  screens remain pending. Native frozen multiseeds remain gated by residual
+  scale/trajectory review. Do not transfer the EEGxPlore AttnRes/MoE/depth/router
+  path.
 - EEGxPlore CBraMod: remains the ICASSP depth-probing/fusion repository; its
   TMLR LoRA, generic, axis-blind, and aligned controls must not be added to the
   ICASSP result registry.
@@ -336,9 +339,8 @@ Backbone × dataset
 │   ├── generic bottleneck
 │   ├── parameter-matched axis-blind adapter
 │   └── low-rank interaction-aligned adapter (separate from LoRA)
-│       ├── channel-off
-│       ├── patch-off
-│       └── eligible axes together
+│       ├── frozen-backbone regime: channel, patch, channel+patch
+│       └── full-backbone-plus-adapter regime: channel, patch, channel+patch
 ├── 3. Mechanism section
 │   ├── realized [C,S,D] and gradient/ratio diagnostics
 │   ├── channel-off, patch-off, and both-off interventions
@@ -388,7 +390,8 @@ CBraMod repository:
 1. audit preprocessing, native branch geometry, checkpoint loading, and
    channel/temporal eligibility;
 2. implement the same high-level `Down -> native-axis mixer -> Up` family and
-   the frozen/full/upper-k, LoRA, generic, axis-blind, and aligned controls;
+   the frozen/full/upper-k, LoRA, generic, axis-blind, frozen-aligned, and
+   full-backbone-plus-aligned controls;
 3. confirm the locked protocol on the TMLR dataset matrix and collect the
    three-seed summaries;
 4. do not import LaBraM code or use the EEGxPlore depth/router implementation.
@@ -445,6 +448,25 @@ multiseed launch:
 The CBraMod FACED result must therefore be interpreted as an instantiation of
 the same interaction-alignment rule, not as “CBraMod gets a different custom
 adapter.”
+
+### CBraMod FACED promotion checklist (2026-08-02)
+
+The FACED cell is promoted in this order:
+
+1. Dense baseline: complete with seeds `42,1024,3407`.
+2. Seed-42 screens: frozen classifier, frozen native channel/patch/channel+patch,
+   generic bottleneck, LoRA QKV-r8, upper-2, and axis-blind; all completed with
+   strict checkpoint loads.
+3. Promote clean controls (frozen classifier, generic bottleneck, LoRA, upper-2,
+   axis-blind) to the three-seed packet after artifact checks.
+4. Validate `native_full_finetune` for native channel, patch, and channel+patch.
+   This mode must train backbone + native adapter + classifier; frozen native
+   mode must train only adapter + classifier.
+5. Reassess native residual ratios, alpha growth, Q/K/V gradients, backbone
+   update norms, and complete validation trajectories. Only then promote native
+   frozen and native full conditions to the three-seed packet.
+6. Close FACED only when every required condition has three-seed artifacts or a
+   documented negative-result decision.
 
 ### Phase 3: deferred ICASSP CBraMod depth study
 

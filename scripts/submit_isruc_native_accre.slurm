@@ -47,6 +47,8 @@ LORA_ALPHA="${LORA_ALPHA:-16}"
 LORA_DROPOUT="${LORA_DROPOUT:-0.0}"
 LORA_TARGET="${LORA_TARGET:-qkv}"
 FROZEN_BACKBONE_EVAL_MODE="${FROZEN_BACKBONE_EVAL_MODE:-0}"
+EXPERIMENT_METHOD="${EXPERIMENT_METHOD:-}"
+TARGET_ADAPTER_PARAMS="${TARGET_ADAPTER_PARAMS:-}"
 SKIP_FINAL_TEST="${SKIP_FINAL_TEST:-0}"
 RUN_ID="${RUN_ID:-isruc_labram_${ADAPTER_TYPE}_current_s${SEED}_b${BATCH_SIZE}_lr${LR}_e${EPOCHS}_test}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_DIR/checkpoints/$RUN_ID}"
@@ -114,6 +116,7 @@ PYTHON_ARGS=(
   --labram_lora_alpha "$LORA_ALPHA"
   --labram_lora_dropout "$LORA_DROPOUT"
   --labram_lora_target "$LORA_TARGET"
+  --experiment_method "$EXPERIMENT_METHOD"
   --isruc_sequence_dropout "$SEQUENCE_DROPOUT"
   --input_scale_divisor 1.0
   --strict_checkpoint_load
@@ -130,6 +133,9 @@ if [[ -n "$ADAPTER_WEIGHT_DECAY" ]]; then
 fi
 if [[ -n "$HEAD_WEIGHT_DECAY" ]]; then
   PYTHON_ARGS+=(--head_weight_decay "$HEAD_WEIGHT_DECAY")
+fi
+if [[ -n "$TARGET_ADAPTER_PARAMS" ]]; then
+  PYTHON_ARGS+=(--target_adapter_params "$TARGET_ADAPTER_PARAMS")
 fi
 
 OMP_NUM_THREADS=1 torchrun --standalone --nnodes=1 --nproc_per_node=1 run_class_finetuning.py \

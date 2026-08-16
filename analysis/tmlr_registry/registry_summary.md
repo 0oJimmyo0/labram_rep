@@ -1,0 +1,97 @@
+# TMLR artifact registry
+
+Generated from 483 completed artifacts; 265 canonical candidates.
+
+Canonical candidates are deterministic suggestions and must be reviewed before final tables.
+
+| Backbone | Dataset | Method | Axis | n | BA | Kappa | Weighted F1 | Parameters |
+|---|---|---|---|---:|---:|---:|---:|---:|
+| CBraMod | faced | axis_blind | generic_token_control | 3 | 0.3879 ± 0.0031 | 0.3097 ± 0.0040 | 0.3864 ± 0.0019 | 128463958.0000 ± 0.0000 |
+| CBraMod | faced | frozen_probe | none | 3 | 0.3777 ± 0.0023 | 0.2993 ± 0.0011 | 0.3784 ± 0.0016 | 128404009.0000 ± 0.0000 |
+| CBraMod | faced | full_finetune | none | 3 | 0.5718 ± 0.0107 | 0.5154 ± 0.0110 | 0.5746 ± 0.0112 | 133287809.0000 ± 0.0000 |
+| CBraMod | faced | generic_bottleneck | none | 3 | 0.3902 ± 0.0031 | 0.3123 ± 0.0031 | 0.3882 ± 0.0033 | 128430274.0000 ± 0.0000 |
+| CBraMod | faced | interaction_aligned | channel | 3 | 0.3795 ± 0.0037 | 0.3015 ± 0.0036 | 0.3800 ± 0.0035 | 128433814.0000 ± 0.0000 |
+| CBraMod | faced | interaction_aligned | channel_patch | 3 | 0.3910 ± 0.0039 | 0.3132 ± 0.0049 | 0.3897 ± 0.0041 | 128463619.0000 ± 0.0000 |
+| CBraMod | faced | interaction_aligned | patch | 3 | 0.3868 ± 0.0071 | 0.3093 ± 0.0072 | 0.3866 ± 0.0060 | 128433814.0000 ± 0.0000 |
+| CBraMod | faced | lora | none | 3 | 0.4174 ± 0.0074 | 0.3417 ± 0.0086 | 0.4161 ± 0.0083 | 128480809.0000 ± 0.0000 |
+| CBraMod | faced | native_full_finetune | channel | 3 | 0.5645 ± 0.0160 | 0.5079 ± 0.0170 | 0.5693 ± 0.0147 | 133317614.0000 ± 0.0000 |
+| CBraMod | faced | native_full_finetune | channel_patch | 3 | 0.5654 ± 0.0042 | 0.5072 ± 0.0042 | 0.5670 ± 0.0031 | 133347419.0000 ± 0.0000 |
+| CBraMod | faced | native_full_finetune | patch | 3 | 0.5667 ± 0.0061 | 0.5102 ± 0.0064 | 0.5719 ± 0.0052 | 133317614.0000 ± 0.0000 |
+| CBraMod | faced | upper_k_finetune | none | 3 | 0.4035 ± 0.0047 | 0.3264 ± 0.0061 | 0.4018 ± 0.0056 | 129209209.0000 ± 0.0000 |
+| CBraMod | isruc | axis_blind | generic_token_control | 3 | 0.7533 ± 0.0078 | 0.7104 ± 0.0108 | 0.7754 ± 0.0082 | 21647410.0000 ± 0.0000 |
+| CBraMod | isruc | frozen_probe | none | 3 | 0.7562 ± 0.0033 | 0.7112 ± 0.0099 | 0.7751 ± 0.0092 | 21587461.0000 ± 0.0000 |
+| CBraMod | isruc | full_finetune | none | 3 | 0.7810 ± 0.0105 | 0.7406 ± 0.0116 | 0.8009 ± 0.0082 | 26471261.0000 ± 0.0000 |
+| CBraMod | isruc | generic_bottleneck | none | 3 | 0.7453 ± 0.0063 | 0.7030 ± 0.0074 | 0.7676 ± 0.0042 | 21613726.0000 ± 0.0000 |
+| CBraMod | isruc | interaction_aligned | channel | 3 | 0.7481 ± 0.0041 | 0.7008 ± 0.0088 | 0.7630 ± 0.0100 | 21604700.6667 ± 10881.8979 |
+| CBraMod | isruc | interaction_aligned | channel_patch | 3 | 0.7531 ± 0.0058 | 0.7146 ± 0.0029 | 0.7752 ± 0.0039 | 21621940.3333 ± 21763.7957 |
+| CBraMod | isruc | interaction_aligned | patch | 3 | 0.7484 ± 0.0049 | 0.7033 ± 0.0086 | 0.7667 ± 0.0109 | 21604700.6667 ± 10881.8979 |
+| CBraMod | isruc | lora | none | 3 | 0.7514 ± 0.0045 | 0.7096 ± 0.0085 | 0.7735 ± 0.0063 | 21664261.0000 ± 0.0000 |
+| CBraMod | isruc | native_full_finetune | channel | 3 | 0.7809 ± 0.0058 | 0.7432 ± 0.0010 | 0.8017 ± 0.0020 | 26501066.0000 ± 0.0000 |
+| CBraMod | isruc | native_full_finetune | channel_patch | 3 | 0.7829 ± 0.0118 | 0.7442 ± 0.0125 | 0.8010 ± 0.0129 | 26530871.0000 ± 0.0000 |
+| CBraMod | isruc | native_full_finetune | patch | 3 | 0.7701 ± 0.0044 | 0.7354 ± 0.0075 | 0.7924 ± 0.0064 | 26501066.0000 ± 0.0000 |
+| CBraMod | isruc | upper_k_finetune | none | 3 | 0.7774 ± 0.0016 | 0.7405 ± 0.0090 | 0.7972 ± 0.0071 | 22392661.0000 ± 0.0000 |
+| CBraMod | physionet_mi | axis_blind | generic_token_control | 3 | 0.5394 ± 0.0041 | 0.3858 ± 0.0055 | 0.5423 ± 0.0066 | 41181753.0000 ± 0.0000 |
+| CBraMod | physionet_mi | frozen_probe | none | 3 | 0.5435 ± 0.0036 | 0.3912 ± 0.0049 | 0.5454 ± 0.0038 | 41121804.0000 ± 0.0000 |
+| CBraMod | physionet_mi | full_finetune | none | 3 | 0.6228 ± 0.0042 | 0.4969 ± 0.0056 | 0.6237 ± 0.0041 | 46005604.0000 ± 0.0000 |
+| CBraMod | physionet_mi | generic_bottleneck | none | 3 | 0.5508 ± 0.0104 | 0.4010 ± 0.0138 | 0.5526 ± 0.0092 | 41148069.0000 ± 0.0000 |
+| CBraMod | physionet_mi | interaction_aligned | channel | 3 | 0.5449 ± 0.0090 | 0.3932 ± 0.0120 | 0.5465 ± 0.0070 | 41151609.0000 ± 0.0000 |
+| CBraMod | physionet_mi | interaction_aligned | channel_patch | 3 | 0.5465 ± 0.0090 | 0.3953 ± 0.0120 | 0.5490 ± 0.0092 | 41156283.3333 ± 21763.7957 |
+| CBraMod | physionet_mi | interaction_aligned | patch | 3 | 0.5419 ± 0.0188 | 0.3892 ± 0.0251 | 0.5416 ± 0.0189 | 41151609.0000 ± 0.0000 |
+| CBraMod | physionet_mi | lora | none | 3 | 0.5493 ± 0.0043 | 0.3991 ± 0.0057 | 0.5516 ± 0.0047 | 41198604.0000 ± 0.0000 |
+| CBraMod | physionet_mi | native_full_finetune | channel | 3 | 0.6214 ± 0.0091 | 0.4952 ± 0.0122 | 0.6225 ± 0.0086 | 46035409.0000 ± 0.0000 |
+| CBraMod | physionet_mi | native_full_finetune | channel_patch | 3 | 0.6246 ± 0.0015 | 0.4994 ± 0.0019 | 0.6250 ± 0.0017 | 46065214.0000 ± 0.0000 |
+| CBraMod | physionet_mi | native_full_finetune | patch | 3 | 0.6263 ± 0.0031 | 0.5016 ± 0.0041 | 0.6274 ± 0.0031 | 46035409.0000 ± 0.0000 |
+| CBraMod | physionet_mi | upper_k_finetune | none | 3 | 0.5985 ± 0.0078 | 0.4646 ± 0.0105 | 0.6000 ± 0.0093 | 41927004.0000 ± 0.0000 |
+| CBraMod | seedv | axis_blind | generic_token_control | 3 | 0.3006 ± 0.0081 | 0.1232 ± 0.0108 | 0.3040 ± 0.0106 | 10141954.0000 ± 0.0000 |
+| CBraMod | seedv | frozen_probe | none | 3 | 0.2987 ± 0.0012 | 0.1209 ± 0.0017 | 0.2985 ± 0.0032 | 10082005.0000 ± 0.0000 |
+| CBraMod | seedv | full_finetune | none | 3 | 0.3876 ± 0.0115 | 0.2408 ± 0.0160 | 0.3964 ± 0.0142 | 14965805.0000 ± 0.0000 |
+| CBraMod | seedv | generic_bottleneck | none | 3 | 0.2938 ± 0.0008 | 0.1134 ± 0.0019 | 0.2944 ± 0.0043 | 10108270.0000 ± 0.0000 |
+| CBraMod | seedv | interaction_aligned | channel | 3 | 0.2918 ± 0.0040 | 0.1127 ± 0.0051 | 0.2917 ± 0.0031 | 10111810.0000 ± 0.0000 |
+| CBraMod | seedv | interaction_aligned | patch | 3 | 0.2951 ± 0.0037 | 0.1169 ± 0.0059 | 0.2985 ± 0.0085 | 10111810.0000 ± 0.0000 |
+| CBraMod | seedv | lora | none | 3 | 0.3838 ± 0.0027 | 0.2331 ± 0.0024 | 0.3925 ± 0.0010 | 10158805.0000 ± 0.0000 |
+| CBraMod | seedv | native_full_finetune | channel | 3 | 0.3953 ± 0.0092 | 0.2507 ± 0.0116 | 0.4049 ± 0.0099 | 14995610.0000 ± 0.0000 |
+| CBraMod | seedv | upper_k_finetune | none | 3 | 0.3898 ± 0.0014 | 0.2393 ± 0.0030 | 0.3958 ± 0.0060 | 10887205.0000 ± 0.0000 |
+| CBraMod | tuev | axis_blind | generic_token_control | 3 | 0.4580 ± 0.0083 | 0.4582 ± 0.0102 | 0.7219 ± 0.0056 | 16262355.0000 ± 0.0000 |
+| CBraMod | tuev | frozen_probe | none | 3 | 0.4656 ± 0.0315 | 0.4699 ± 0.0195 | 0.7279 ± 0.0096 | 16202406.0000 ± 0.0000 |
+| CBraMod | tuev | full_finetune | none | 3 | 0.6201 ± 0.0241 | 0.6424 ± 0.0231 | 0.8139 ± 0.0102 | 21086206.0000 ± 0.0000 |
+| CBraMod | tuev | generic_bottleneck | none | 3 | 0.4612 ± 0.0124 | 0.4412 ± 0.0077 | 0.7121 ± 0.0046 | 16228671.0000 ± 0.0000 |
+| CBraMod | tuev | interaction_aligned | channel | 3 | 0.4559 ± 0.0022 | 0.4643 ± 0.0144 | 0.7258 ± 0.0075 | 16232211.0000 ± 0.0000 |
+| CBraMod | tuev | interaction_aligned | channel_patch | 3 | 0.4548 ± 0.0223 | 0.4497 ± 0.0212 | 0.7174 ± 0.0112 | 16262016.0000 ± 0.0000 |
+| CBraMod | tuev | interaction_aligned | patch | 3 | 0.4553 ± 0.0068 | 0.4443 ± 0.0029 | 0.7145 ± 0.0022 | 16232211.0000 ± 0.0000 |
+| CBraMod | tuev | lora | none | 3 | 0.5550 ± 0.0090 | 0.5447 ± 0.0123 | 0.7641 ± 0.0059 | 16279206.0000 ± 0.0000 |
+| CBraMod | tuev | native_full_finetune | channel | 3 | 0.6234 ± 0.0216 | 0.6362 ± 0.0464 | 0.8119 ± 0.0223 | 21116011.0000 ± 0.0000 |
+| CBraMod | tuev | native_full_finetune | channel_patch | 3 | 0.6329 ± 0.0148 | 0.6184 ± 0.0383 | 0.7999 ± 0.0183 | 21145816.0000 ± 0.0000 |
+| CBraMod | tuev | native_full_finetune | patch | 3 | 0.6393 ± 0.0118 | 0.6364 ± 0.0272 | 0.8120 ± 0.0152 | 21116011.0000 ± 0.0000 |
+| CBraMod | tuev | upper_k_finetune | none | 3 | 0.5567 ± 0.0311 | 0.5640 ± 0.0330 | 0.7732 ± 0.0156 | 17007606.0000 ± 0.0000 |
+| LaBraM | FACED | frozen_native_generic | generic | 3 | 0.1782 ± 0.0026 | 0.0775 ± 0.0031 | 0.1726 ± 0.0028 | 28074.0000 ± 0.0000 |
+| LaBraM | FACED | frozen_native_patch | patch | 3 | 0.1674 ± 0.0074 | 0.0643 ± 0.0079 | 0.1564 ± 0.0007 | 163010.0000 ± 0.0000 |
+| LaBraM | FACED | frozen_probe | none | 3 | 0.1400 ± 0.0034 | 0.0352 ± 0.0031 | 0.1032 ± 0.0176 | 1809.0000 ± 0.0000 |
+| LaBraM | FACED | lora | qkv | 3 | 0.2823 ± 0.0324 | 0.1918 ± 0.0362 | 0.2801 ± 0.0319 | 78609.0000 ± 0.0000 |
+| LaBraM | FACED | upper2 | upper | 3 | 0.2969 ± 0.0011 | 0.2081 ± 0.0012 | 0.2966 ± 0.0015 | 967169.0000 ± 0.0000 |
+| LaBraM | ISRUC | axis_blind | generic_token_control | 3 | 0.7233 ± 0.0022 | 0.6832 ± 0.0021 | 0.7456 ± 0.0018 | 162006.0000 ± 0.0000 |
+| LaBraM | ISRUC | dense | none | 1 | 0.8048 ± 0.0000 | 0.7689 ± 0.0000 | 0.8211 ± 0.0000 | 6303541.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | dense | none | 3 | 0.6093 ± 0.0147 | 0.4791 ± 0.0196 | 0.6103 ± 0.0154 | 5820740.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | frozen_native_channel_patch | channel_patch | 3 | 0.2833 ± 0.0052 | 0.0444 ± 0.0069 | 0.2672 ± 0.0095 | 86614.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | frozen_native_generic | generic | 3 | 0.2699 ± 0.0014 | 0.0266 ± 0.0019 | 0.2580 ± 0.0009 | 27069.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | frozen_probe | none | 3 | 0.2694 ± 0.0005 | 0.0259 ± 0.0007 | 0.2618 ± 0.0049 | 804.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | lora | qkv | 3 | 0.5435 ± 0.0251 | 0.3913 ± 0.0335 | 0.5437 ± 0.0267 | 77604.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | native_channel | channel | 3 | 0.6153 ± 0.0123 | 0.4869 ± 0.0165 | 0.6159 ± 0.0124 | 5863645.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | native_channel_patch | channel_patch | 3 | 0.6253 ± 0.0082 | 0.5002 ± 0.0109 | 0.6267 ± 0.0093 | 5906550.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | native_patch | patch | 3 | 0.6256 ± 0.0100 | 0.5006 ± 0.0134 | 0.6269 ± 0.0115 | 5863645.0000 ± 0.0000 |
+| LaBraM | PhysioNet-MI | upper2 | upper | 3 | 0.5156 ± 0.0202 | 0.3540 ± 0.0269 | 0.5145 ± 0.0210 | 966164.0000 ± 0.0000 |
+| LaBraM | SEED-V | dense | none | 3 | 0.4067 ± 0.0049 | 0.2586 ± 0.0082 | 0.4105 ± 0.0064 | 5820941.0000 ± 0.0000 |
+| LaBraM | SEED-V | frozen_native_generic | generic | 3 | 0.2954 ± 0.0009 | 0.1157 ± 0.0011 | 0.2807 ± 0.0015 | 27270.0000 ± 0.0000 |
+| LaBraM | SEED-V | lora | qkv | 3 | 0.2856 ± 0.0037 | 0.1080 ± 0.0053 | 0.2787 ± 0.0071 | 77805.0000 ± 0.0000 |
+| LaBraM | SEED-V | upper2 | upper | 3 | 0.3859 ± 0.0041 | 0.2344 ± 0.0054 | 0.3937 ± 0.0053 | 966365.0000 ± 0.0000 |
+| LaBraM | TUEV | axis_blind | generic_token_control | 3 | 0.4307 ± 0.0010 | 0.5269 ± 0.0015 | 0.7523 ± 0.0008 | 87220.0000 ± 0.0000 |
+| LaBraM | TUEV | dense | none | 3 | 0.5865 ± 0.0120 | 0.6126 ± 0.0147 | 0.7967 ± 0.0081 | 5821142.0000 ± 0.0000 |
+| LaBraM | TUEV | frozen_native_channel | channel | 3 | 0.4323 ± 0.0186 | 0.4602 ± 0.0309 | 0.7128 ± 0.0207 | 44111.0000 ± 0.0000 |
+| LaBraM | TUEV | frozen_native_channel_patch | channel_patch | 3 | 0.3916 ± 0.0182 | 0.4612 ± 0.0471 | 0.7131 ± 0.0258 | 87016.0000 ± 0.0000 |
+| LaBraM | TUEV | frozen_native_generic | generic | 3 | 0.4367 ± 0.0126 | 0.5152 ± 0.0135 | 0.7457 ± 0.0068 | 27471.0000 ± 0.0000 |
+| LaBraM | TUEV | frozen_native_patch | patch | 3 | 0.3988 ± 0.0182 | 0.4907 ± 0.0090 | 0.7322 ± 0.0053 | 44111.0000 ± 0.0000 |
+| LaBraM | TUEV | frozen_probe | none | 3 | 0.3658 ± 0.0000 | 0.4468 ± 0.0000 | 0.7084 ± 0.0000 | 1206.0000 ± 0.0000 |
+| LaBraM | TUEV | lora | qkv | 3 | 0.5717 ± 0.0229 | 0.5813 ± 0.0183 | 0.7828 ± 0.0073 | 78006.0000 ± 0.0000 |
+| LaBraM | TUEV | native_channel | channel | 3 | 0.5961 ± 0.0083 | 0.5769 ± 0.0080 | 0.7805 ± 0.0057 | 5864047.0000 ± 0.0000 |
+| LaBraM | TUEV | native_channel_patch | channel_patch | 3 | 0.5837 ± 0.0223 | 0.5310 ± 0.0289 | 0.7495 ± 0.0161 | 5906952.0000 ± 0.0000 |
+| LaBraM | TUEV | native_patch | patch | 3 | 0.5795 ± 0.0637 | 0.5794 ± 0.0455 | 0.7827 ± 0.0230 | 5864047.0000 ± 0.0000 |
+| LaBraM | TUEV | upper2 | upper | 3 | 0.5412 ± 0.0204 | 0.5638 ± 0.0423 | 0.7729 ± 0.0198 | 966566.0000 ± 0.0000 |

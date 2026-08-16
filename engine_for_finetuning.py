@@ -104,6 +104,33 @@ def set_frozen_labram_eval_mode(model: torch.nn.Module) -> None:
         adapter.train()
 
 
+def frozen_repeat_features(core_model: torch.nn.Module, samples: torch.Tensor,
+                           input_chans=None) -> torch.Tensor:
+    """Extract deterministic representations for the frozen-backbone check.
+
+    ISRUC loaders return subject sequences with shape ``[B, L, C, S, T]``.
+    The model's public ``forward`` handles that sequence wrapper, but
+    ``forward_features`` intentionally accepts only one epoch at a time.  The
+    frozen-repeat diagnostic must therefore flatten the sequence, extract
+    epoch features, and apply the frozen sequence encoder before comparing the
+    two passes.  Ordinary four-dimensional datasets keep the original path.
+    """
+    if samples.ndim != 5:
+        return core_model.forward_features(samples, input_chans=input_chans)
+
+    batch_size, sequence_length, channels, patches, patch_size = samples.shape
+    epoch_features = core_model.forward_features(
+        samples.reshape(batch_size * sequence_length, channels, patches, patch_size),
+        input_chans=input_chans,
+    )
+    sequence_encoder = getattr(core_model, "sequence_encoder", None)
+    if sequence_encoder is None:
+        return epoch_features.reshape(batch_size, sequence_length, -1)
+    return sequence_encoder(
+        epoch_features.reshape(batch_size, sequence_length, epoch_features.shape[-1])
+    )
+
+
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
@@ -171,8 +198,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             # train mode only for the explicitly trainable head/adapter.
             core_model.eval()
             with torch.no_grad():
-                features_a = core_model.forward_features(samples, input_chans=input_chans)
-                features_b = core_model.forward_features(samples, input_chans=input_chans)
+                features_a = frozen_repeat_features(core_model, samples, input_chans=input_chans)
+                features_b = frozen_repeat_features(core_model, samples, input_chans=input_chans)
             frozen_feature_repeat_diff = float((features_a - features_b).abs().max().cpu())
             if not torch.equal(features_a, features_b):
                 raise RuntimeError(
