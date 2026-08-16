@@ -1,6 +1,6 @@
 # TMLR manuscript scaffold: Interaction-Aligned Adaptation for EEG Foundation Models
 
-Status: evidence inventory, 2026-08-15
+Status: evidence inventory and paired-effect audit, 2026-08-16
 
 This is a working cross-backbone manuscript scaffold. It separates completed
 evidence from exploratory artifacts and from results that are not yet
@@ -17,8 +17,8 @@ Foundation Models?
 
 Does placing a common lightweight residual interaction primitive on the
 semantically defined, non-degenerate interaction axes of an EEG foundation
-model improve the performance-efficiency trade-off over generic PEFT and
-simple fine-tuning controls?
+model provide value beyond generic trainable capacity and parameter-matched
+axis-blind controls?
 
 ### Prospective design rule
 
@@ -32,6 +32,30 @@ simple fine-tuning controls?
 
 The backbone-specific part is the axis mapping required by the encoder. The
 paper must not present CBraMod and LaBraM as two separately tuned adapters.
+
+### Evidence-freeze artifacts
+
+The deterministic registry is supplemented by a conservative manuscript audit:
+
+- `analysis/tmlr_registry/evidence_manifest.csv` records automatic candidate
+  labels, orthogonal RQ eligibility, and human-review fields. Every artifact's
+  current `manual_status` remains `UNREVIEWED`.
+- `analysis/tmlr_registry/paired_effects.csv` contains same-seed metric
+  differences for native-versus-control comparisons, with provisional pair
+  validity and parameter-match metadata.
+- `analysis/tmlr_registry/paired_effects_summary.csv` aggregates those effects
+  without pooling seeds as independent observations.
+- `analysis/tmlr_registry/manual_review_queue.csv` is the review template for
+  candidate artifacts.
+- `analysis/tmlr_registry/evidence_manifest_summary.md` records control
+  coverage and the interpretation rule for the primary claim.
+
+The strongest causal alignment claim is restricted to manually validated RQ2
+native/control pairs. In the current inventory, CBraMod has matched axis-blind coverage across
+the listed datasets, while LaBraM has strict matched coverage on TUEV. LaBraM
+ISRUC has an axis-blind packet but its native comparator remains supporting
+legacy evidence; FACED, PhysioNet-MI, and SEED-V do not have the same strict
+matched axis-blind pair.
 
 ## 2. What the completed experiments currently show
 
@@ -82,12 +106,10 @@ kappa-selected checkpoints and test evaluation after selection.
 | LaBraM / PhysioNet-MI / dense | approximately 0.6093 +/- 0.0147 | Dense reference |
 | LaBraM / PhysioNet-MI / frozen channel+patch | approximately 0.283 | Modest gain over frozen probe |
 
-CBraMod TUEV already has a canonical 12-condition multiseed packet under the
-20-epoch operational contract. Ten conditions are complete for all three
-seeds. The two remaining seed-3407 cells are currently running: frozen LoRA
-QKV-r8 (`13420213`) and full native channel (`13420214`). The earlier dropout,
-gamma, stability, and head-dropout runs are separate seed-42 diagnostics and
-must not be mixed into this locked packet.
+CBraMod TUEV now has a canonical 12-condition multi-seed packet under the
+20-epoch operational contract. The earlier dropout, gamma, stability, and
+head-dropout runs are separate seed-42 diagnostics and must not be mixed into
+this locked packet.
 
 ## 3. Mechanistic story to develop
 
@@ -106,8 +128,8 @@ The most interesting cross-backbone result is a regime separation:
    do not support treating every nominal axis as equally useful.
 4. **Optimization:** many constrained runs peak early while train loss keeps
    falling. The classifier head is a major part of the instability, so
-   trajectory plots and per-epoch test diagnostics are necessary to distinguish
-   a useful residual from a short-lived checkpoint effect.
+   validation trajectories and post-hoc per-epoch test diagnostics help
+   distinguish a useful residual from a short-lived checkpoint effect.
 
 This makes the paper more informative than a single leaderboard comparison:
 it asks when structure-aware adaptation is useful, what regime it helps, and
@@ -142,32 +164,20 @@ when it fails.
 
 ## 5. Remaining high-value work, in priority order
 
-The goal should be closure of causal evidence, not another broad hyperparameter
-sweep.
+The goal is evidence closure, not another broad hyperparameter sweep.
 
-1. **Finish and audit the two CBraMod TUEV jobs.** This completes the missing
-   two cells of the 12-condition x 3-seed packet. Compare their per-epoch test
-   curves against the frozen probe at the same epoch, but do not select a
-   test-best checkpoint.
-2. **Build the cross-backbone result registry.** For every artifact record
-   dataset, backbone, method, axis, seed, trainable parameters, selected epoch,
-   validation metric, test BA/macro-F1/kappa/weighted-F1, residual ratio,
-   adapter gradient, backbone update norm, runtime, and peak memory. This is
-   analysis work rather than a new training sweep.
-3. **Complete the parameter-budget audit.** Existing CBraMod axis-blind
-   controls are not enough: LaBraM needs an explicit parameter-matched
-   axis-blind comparison before the manuscript makes a causal alignment claim.
-   Do not call generic bottlenecks “matched” without the +/-5% count check.
-4. **Resolve the primitive mismatch.** Some LaBraM FACED/TUEV cells are older
-   full-width native adapters, while LaBraM ISRUC/PhysioNet-MI and CBraMod use
-   bottlenecked/low-rank variants. Either run a small, prespecified LaBraM
-   closure packet with the same Down/mixer/Up family on one representative
-   shared dataset, or label the older cells as pilot evidence and narrow the
-   pooled claim.
-5. **Close the protocol caveats.** For SEED-V, either add subject-disjoint
-   evaluation or explicitly restrict the paper to the validated within-subject
-   protocol. Preserve the serialized-only ISRUC and non-claimed TUEV subject
-   provenance limitations.
+1. Manually review the generated evidence manifest and promote only artifacts
+   that satisfy the locked protocol into the primary tables.
+2. Recompute the final paired-effect tables and figures from the manifest,
+   reporting individual seed differences, mean differences, standard
+   deviations, and positive-seed counts.
+3. Resolve the remaining legacy metadata cells. They may be manually promoted
+   to supporting or primary evidence only when their logs/configurations prove
+   the required contract; otherwise they remain supporting.
+4. Preserve the SEED-V within-subject and singleton-patch qualification and the
+   PhysioNet-MI serialized-only qualification.
+5. Freeze commits, configuration hashes, checkpoint hashes, split hashes, and
+   the final anonymized reproducibility snapshot.
 
 ### Runs that are not currently justified
 
@@ -205,8 +215,9 @@ sweep.
 - **Figure 1:** prospective construction rule and the CBraMod/LaBraM axis map.
 - **Figure 2:** performance versus trainable parameters, with seed error bars.
 - **Figure 3:** frozen probe-relative BA/macro-F1 by dataset and backbone.
-- **Figure 4:** representative epoch trajectories, including residual ratio,
-  validation metric, train loss, and per-epoch test diagnostics.
+- **Figure 4:** representative validation trajectories, including residual
+  ratio, validation metric, and train loss; move post-hoc per-epoch test
+  diagnostics to the supplement unless needed for a specific audit.
 - **Figure 5:** TUEV per-class recall/F1 and confusion matrices for probe,
   aligned, generic, LoRA, and dense references.
 - **Table 1:** dataset geometry, eligibility, split, and provenance.
