@@ -47,6 +47,11 @@ The deterministic registry is supplemented by a conservative manuscript audit:
   without pooling seeds as independent observations.
 - `analysis/tmlr_registry/manual_review_queue.csv` is the review template for
   candidate artifacts.
+- `analysis/tmlr_registry/pair_review_queue.csv` is the separate pair-level
+  contract review template; structurally invalid parameter-mismatched pairs
+  are marked ineligible automatically.
+- `scripts/finalize_tmlr_snapshot.py` refuses to create `frozen_v1/` until
+  candidate artifacts and retained RQ2 pairs have completed manual review.
 - `analysis/tmlr_registry/evidence_manifest_summary.md` records control
   coverage and the interpretation rule for the primary claim.
 

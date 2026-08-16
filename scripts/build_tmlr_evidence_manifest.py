@@ -113,6 +113,7 @@ def classify(rows):
         row["reviewed_by"] = ""
         row["review_date"] = ""
         row["review_notes"] = ""
+        row["exclusion_reason_code"] = "UNREVIEWED"
         row["source_log_path"] = row["artifact_dir"]
         row["previous_status"] = ""
         row["status_change_reason"] = ""
@@ -205,14 +206,17 @@ def pair_rows(rows, left_method, right_method, comparison):
         match_pct = parameter_match_pct(left, right)
         same_regime = is_frozen_regime(left) == is_frozen_regime(right)
         if comparison == "aligned_vs_axis_blind" and not same_regime:
-            pair_validity = "INVALID"
+            pair_validity = "PAIR_STRUCTURALLY_INVALID"
             invalid_reason = "frozen/trainable regime mismatch"
+            pair_contract_valid = "False"
         elif match_pct is not None and comparison == "aligned_vs_axis_blind" and match_pct > 5.0:
-            pair_validity = "INVALID"
+            pair_validity = "PAIR_STRUCTURALLY_INVALID"
             invalid_reason = "parameter mismatch exceeds 5 percent"
+            pair_contract_valid = "False"
         else:
-            pair_validity = "PROVISIONAL_PENDING_MANUAL_REVIEW"
+            pair_validity = "PAIR_ARTIFACT_UNVERIFIED"
             invalid_reason = "full configuration-level nuisance matching not yet manually confirmed"
+            pair_contract_valid = "True"
         for metric in METRICS:
             left_value = as_float(left.get(metric))
             right_value = as_float(right.get(metric))
@@ -233,6 +237,8 @@ def pair_rows(rows, left_method, right_method, comparison):
                 "left_better": int(left_value > right_value),
                 "parameter_match_pct": match_pct,
                 "pair_validity": pair_validity,
+                "pair_contract_valid": pair_contract_valid,
+                "pair_artifacts_verified": "False",
                 "pair_invalid_reason": invalid_reason,
                 "left_artifact": left["run_id"],
                 "right_artifact": right["run_id"],
@@ -301,17 +307,17 @@ def annotate_rq_eligibility(rows, pairs):
             comparisons[comparison].append(validity)
         if "aligned_vs_frozen_probe" in comparisons:
             row["rq1_eligible"] = (
-                "PROVISIONAL" if any(v != "INVALID" for v in comparisons["aligned_vs_frozen_probe"])
+                "PROVISIONAL" if any(v != "PAIR_STRUCTURALLY_INVALID" for v in comparisons["aligned_vs_frozen_probe"])
                 else "no"
             )
         if "aligned_vs_axis_blind" in comparisons:
             row["rq2_eligible"] = (
-                "PROVISIONAL" if any(v != "INVALID" for v in comparisons["aligned_vs_axis_blind"])
+                "PROVISIONAL" if any(v != "PAIR_STRUCTURALLY_INVALID" for v in comparisons["aligned_vs_axis_blind"])
                 else "no"
             )
         if "frozen_aligned_vs_full_native" in comparisons:
             row["rq3_eligible"] = (
-                "PROVISIONAL" if any(v != "INVALID" for v in comparisons["frozen_aligned_vs_full_native"])
+                "PROVISIONAL" if any(v != "PAIR_STRUCTURALLY_INVALID" for v in comparisons["frozen_aligned_vs_full_native"])
                 else "no"
             )
 
@@ -327,17 +333,50 @@ def annotate_pair_status(rows, pairs):
         statuses = by_artifact.get(row["run_id"], [])
         if not statuses:
             continue
-        if any(status != "INVALID" for status in statuses):
-            row["alignment_control_available"] = "primary_pair_provisional"
+        if any(status == "PAIR_ARTIFACT_UNVERIFIED" for status in statuses):
+            row["alignment_control_available"] = "primary_pair_unverified"
         else:
-            row["alignment_control_available"] = "primary_pair_invalid"
+            row["alignment_control_available"] = "primary_pair_structurally_invalid"
 
 
 def write_csv(path, rows, fields):
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def make_pair_review_queue(pairs):
+    unique = {}
+    for pair in pairs:
+        key = (
+            pair["comparison"], pair["backbone"], pair["dataset"], pair["axis"],
+            pair["seed"], pair["left_artifact"], pair["right_artifact"],
+        )
+        if key in unique:
+            continue
+        unique[key] = {
+            "comparison": pair["comparison"],
+            "backbone": pair["backbone"],
+            "dataset": pair["dataset"],
+            "axis": pair["axis"],
+            "seed": pair["seed"],
+            "left_method": pair["left_method"],
+            "right_method": pair["right_method"],
+            "left_artifact": pair["left_artifact"],
+            "right_artifact": pair["right_artifact"],
+            "parameter_match_pct": pair["parameter_match_pct"],
+            "pair_contract_valid": pair["pair_contract_valid"],
+            "pair_validity": pair["pair_validity"],
+            "pair_artifacts_verified": "False",
+            "pair_review_status": (
+                "NOT_ELIGIBLE" if pair["pair_validity"] == "PAIR_STRUCTURALLY_INVALID" else "UNREVIEWED"
+            ),
+            "pair_reviewed_by": "",
+            "pair_review_date": "",
+            "pair_review_notes": "",
+        }
+    return list(unique.values())
 
 
 def write_summary(rows, pairs, summaries):
@@ -357,7 +396,7 @@ def write_summary(rows, pairs, summaries):
         f"Automatic candidates — primary: {counts['PRIMARY']}; supporting: {counts['SUPPORTING']}; pilot: {counts['PILOT']}; excluded: {counts['EXCLUDED']}",
         "Manual artifact status: UNREVIEWED for every row; automatic candidate labels are not manuscript adjudications.",
         f"Paired metric effects: {len(pairs)} rows across {len(summaries)} summaries",
-        f"Invalid paired-effect rows: {sum(row['pair_validity'] == 'INVALID' for row in pairs)}; these are excluded from provisional RQ2 eligibility.",
+        f"Structurally invalid paired-effect rows: {sum(row['pair_validity'] == 'PAIR_STRUCTURALLY_INVALID' for row in pairs)}; these are excluded from provisional RQ2 eligibility.",
         "",
         "## Alignment-control coverage",
         "",
@@ -377,6 +416,7 @@ def write_summary(rows, pairs, summaries):
         "- `paired_effects.csv`: same-seed metric differences.",
         "- `paired_effects_summary.csv`: mean, standard deviation, seed count, and positive-seed count.",
         "- `manual_review_queue.csv`: candidate rows prepared for human adjudication.",
+        "- `pair_review_queue.csv`: pair-level contract review required before final RQ2 analysis.",
     ])
     (OUT / "evidence_manifest_summary.md").write_text("\n".join(lines) + "\n")
 
@@ -399,7 +439,7 @@ def main():
         "canonical_group_n", "canonical_group_seeds", "alignment_control_available",
         "probe_available", "rq1_eligible", "rq2_eligible", "rq3_eligible", "rq4_eligible",
         "reviewed_by", "review_date", "review_notes", "source_log_path",
-        "previous_status", "status_change_reason", "status_change_date", "source",
+        "previous_status", "status_change_reason", "status_change_date", "exclusion_reason_code", "source",
     ]
     # Keep the original seed column for traceability and remove only internal helpers.
     write_csv(OUT / "evidence_manifest.csv", rows, manifest_fields)
@@ -413,9 +453,13 @@ def main():
         "contract_valid", "selected_epoch", "val_selection_value", *METRICS,
         "trainable_parameters", "source_log_path", "reviewed_by", "review_date",
         "review_notes", "previous_status", "status_change_reason", "status_change_date",
+        "exclusion_reason_code",
     ]
     review_rows = [row for row in rows if as_bool(row["candidate"])]
     write_csv(OUT / "manual_review_queue.csv", review_rows, review_fields)
+    pair_review_rows = make_pair_review_queue(pairs)
+    pair_review_fields = list(pair_review_rows[0].keys()) if pair_review_rows else ["comparison"]
+    write_csv(OUT / "pair_review_queue.csv", pair_review_rows, pair_review_fields)
     write_summary(rows, pairs, summaries)
     print(f"Wrote {len(rows)} manifest rows, {len(review_rows)} review rows, {len(pairs)} paired effects, and {len(summaries)} summaries to {OUT}")
 
