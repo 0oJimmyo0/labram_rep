@@ -13,8 +13,7 @@ import argparse
 import csv
 import hashlib
 import json
-import shutil
-from collections import defaultdict
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,6 +49,11 @@ def fail(message):
     raise SystemExit(f"FINALIZATION BLOCKED: {message}")
 
 
+def write_summary_csv(path, counter, field_name):
+    rows = [{field_name: key, "count": value} for key, value in sorted(counter.items())]
+    write_csv(path, rows)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", type=Path, default=Path(__file__).resolve().parents[1] / "analysis" / "tmlr_registry")
@@ -64,6 +68,10 @@ def main():
     unreviewed = [row for row in candidates if row.get("manual_status") == "UNREVIEWED"]
     if unreviewed:
         fail(f"{len(unreviewed)} candidate artifacts still have manual_status=UNREVIEWED; review manual_review_queue.csv first")
+    allowed_statuses = {"PRIMARY", "SUPPORTING", "PILOT", "EXCLUDED"}
+    unknown = [row for row in candidates if row.get("manual_status") not in allowed_statuses]
+    if unknown:
+        fail(f"{len(unknown)} candidate artifacts have an unknown manual_status")
 
     pairs = read_csv(registry / "paired_effects.csv")
     pair_review = read_csv(registry / "pair_review_queue.csv")
@@ -87,7 +95,7 @@ def main():
             eligible = eligible and review.get("pair_artifacts_verified") == "True"
         if eligible:
             final_pairs.append(pair)
-        elif pair["comparison"] == "aligned_vs_axis_blind":
+        elif pair["comparison"] == "aligned_vs_axis_blind" and pair.get("pair_validity") != "PAIR_STRUCTURALLY_INVALID":
             blocked_pairs.append(pair)
 
     if blocked_pairs:
@@ -105,8 +113,12 @@ def main():
     write_csv(pair_path, final_pairs)
     write_csv(review_path, pair_review)
 
+    artifact_review_path = output / f"artifact_review_log_{args.version}.csv"
+    write_csv(artifact_review_path, candidates)
+
     contract = {
         "version": args.version,
+        "schema_version": "tmlr-evidence-v1",
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "source_registry": str(registry),
         "candidate_artifacts": len(candidates),
@@ -114,15 +126,60 @@ def main():
         "rq2_rule": "both artifacts manually PRIMARY; pair contract valid; pair review VALID; pair artifacts verified",
         "parameter_match_tolerance_percent": 5.0,
         "metrics": list(METRICS),
+        "primary_metrics": ["balanced_accuracy", "macro_f1"],
+        "secondary_metrics": ["cohen_kappa", "weighted_f1"],
+        "checkpoint_selector": "validation_kappa",
+        "seeds": [42, 1024, 3407],
+        "artifact_inclusion": "manual_status == PRIMARY",
     }
     contract_path = output / f"analysis_contract_{args.version}.json"
     contract_path.write_text(json.dumps(contract, indent=2) + "\n")
 
-    review_log_path = output / f"review_log_{args.version}.csv"
-    write_csv(review_log_path, candidates)
+    pair_review_log_path = output / f"pair_review_log_{args.version}.csv"
+    write_csv(pair_review_log_path, pair_review)
 
-    hash_path = output / "manifest_sha256.txt"
-    hashed = [manifest_path, pair_path, review_path, contract_path, review_log_path]
+    exclusion_path = output / f"exclusion_summary_{args.version}.csv"
+    exclusion_counter = Counter(
+        row.get("exclusion_reason_code", "UNSPECIFIED")
+        for row in manifest
+        if row.get("manual_status") in {"SUPPORTING", "PILOT", "EXCLUDED"}
+    )
+    write_summary_csv(exclusion_path, exclusion_counter, "exclusion_reason_code")
+
+    script_hashes = {}
+    for script_name in ("build_tmlr_evidence_manifest.py", "finalize_tmlr_snapshot.py"):
+        script_path = Path(__file__).with_name(script_name)
+        script_hashes[script_name] = sha256(script_path)
+    source_hashes_path = output / f"source_hashes_{args.version}.json"
+    source_hashes_path.write_text(json.dumps({
+        "scripts": script_hashes,
+        "inputs": {
+            name: sha256(registry / name)
+            for name in ("all_artifacts.csv", "evidence_manifest.csv", "paired_effects.csv", "pair_review_queue.csv")
+            if (registry / name).exists()
+        },
+    }, indent=2) + "\n")
+
+    snapshot_manifest_path = output / f"snapshot_manifest_{args.version}.json"
+    snapshot_manifest_path.write_text(json.dumps({
+        "version": args.version,
+        "created_utc": contract["created_utc"],
+        "row_counts": {
+            "all_artifacts": len(manifest),
+            "candidate_artifacts": len(candidates),
+            "final_pairs": len(final_pairs),
+        },
+        "rq_counts": {
+            "rq2_final_pair_metric_rows": sum(pair["comparison"] == "aligned_vs_axis_blind" for pair in final_pairs),
+        },
+    }, indent=2) + "\n")
+
+    hash_path = output / "SHA256SUMS"
+    hashed = [
+        manifest_path, pair_path, review_path, artifact_review_path,
+        pair_review_log_path, exclusion_path, contract_path,
+        source_hashes_path, snapshot_manifest_path,
+    ]
     hash_path.write_text("\n".join(f"{sha256(path)}  {path.name}" for path in hashed) + "\n")
     print(f"Frozen {args.version}: {len(candidates)} reviewed candidates and {len(final_pairs)} final paired rows in {output}")
 

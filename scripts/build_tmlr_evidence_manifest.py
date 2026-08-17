@@ -28,6 +28,47 @@ def read_csv(path: Path):
         return list(csv.DictReader(handle))
 
 
+def merge_manual_review_state(rows):
+    path = OUT / "manual_review_queue.csv"
+    if not path.exists():
+        return
+    prior = {row.get("run_id"): row for row in read_csv(path)}
+    fields = (
+        "artifact_status", "manual_status", "reviewed_by", "review_date",
+        "review_notes", "previous_status", "status_change_reason",
+        "status_change_date", "exclusion_reason_code",
+    )
+    for row in rows:
+        old = prior.get(row.get("run_id"))
+        if old is None:
+            continue
+        for field in fields:
+            if old.get(field, "") != "":
+                row[field] = old[field]
+
+
+def merge_pair_review_state(rows):
+    path = OUT / "pair_review_queue.csv"
+    if not path.exists():
+        return
+    keys = (
+        "comparison", "backbone", "dataset", "axis", "seed",
+        "left_artifact", "right_artifact",
+    )
+    prior = {tuple(row.get(key, "") for key in keys): row for row in read_csv(path)}
+    fields = (
+        "pair_artifacts_verified", "pair_review_status", "pair_reviewed_by",
+        "pair_review_date", "pair_review_notes",
+    )
+    for row in rows:
+        old = prior.get(tuple(row.get(key, "") for key in keys))
+        if old is None:
+            continue
+        for field in fields:
+            if old.get(field, "") != "":
+                row[field] = old[field]
+
+
 def as_bool(value):
     return str(value).lower() == "true"
 
@@ -132,11 +173,18 @@ def classify(rows):
         row["rq4_eligible"] = "yes" if status != "EXCLUDED" else "no"
 
 
+def pair_artifact_candidate(row):
+    """Use manual PRIMARY decisions once available; otherwise use provisional candidates."""
+    if row.get("manual_status") != "UNREVIEWED":
+        return row.get("manual_status") == "PRIMARY"
+    return row.get("evidence_status") == "PRIMARY"
+
+
 def primary_index(rows):
     exact = {}
     broad = defaultdict(list)
     for row in rows:
-        if row["evidence_status"] != "PRIMARY":
+        if not pair_artifact_candidate(row):
             continue
         exact[(row["backbone"], row["dataset"], row["axis"], row["seed_int"], row["method"])] = row
         broad[(row["backbone"], row["dataset"], row["seed_int"], row["method"])].append(row)
@@ -182,7 +230,7 @@ def annotate_alignment_coverage(rows):
         has_probe = ((exact_key + (probe,)) in exact or
                      bool(broad.get(broad_key + (probe,))))
         if has_control:
-            row["alignment_control_available"] = "primary_pair" if row["evidence_status"] == "PRIMARY" else "control_only"
+            row["alignment_control_available"] = "primary_pair" if pair_artifact_candidate(row) else "control_only"
         else:
             row["alignment_control_available"] = "no_primary_control"
         row["probe_available"] = "yes" if has_probe else "no_primary_probe"
@@ -192,7 +240,7 @@ def pair_rows(rows, left_method, right_method, comparison):
     exact, broad = primary_index(rows)
 
     pairs = []
-    left_rows = [row for row in rows if row["evidence_status"] == "PRIMARY" and row["method"] in left_method]
+    left_rows = [row for row in rows if pair_artifact_candidate(row) and row["method"] in left_method]
     for left in left_rows:
         right_name = right_method(left) if callable(right_method) else right_method
         exact_key = (left["backbone"], left["dataset"], left["axis"], left["seed_int"], right_name)
@@ -424,6 +472,7 @@ def write_summary(rows, pairs, summaries):
 def main():
     rows = read_csv(REGISTRY / "all_artifacts.csv")
     classify(rows)
+    merge_manual_review_state(rows)
     annotate_alignment_coverage(rows)
     pairs = make_pairs(rows)
     annotate_pair_status(rows, pairs)
@@ -458,6 +507,7 @@ def main():
     review_rows = [row for row in rows if as_bool(row["candidate"])]
     write_csv(OUT / "manual_review_queue.csv", review_rows, review_fields)
     pair_review_rows = make_pair_review_queue(pairs)
+    merge_pair_review_state(pair_review_rows)
     pair_review_fields = list(pair_review_rows[0].keys()) if pair_review_rows else ["comparison"]
     write_csv(OUT / "pair_review_queue.csv", pair_review_rows, pair_review_fields)
     write_summary(rows, pairs, summaries)
