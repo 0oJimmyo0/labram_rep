@@ -62,6 +62,12 @@ ISRUC has an axis-blind packet but its native comparator remains supporting
 legacy evidence; FACED, PhysioNet-MI, and SEED-V do not have the same strict
 matched axis-blind pair.
 
+For manuscript preparation, use the smaller deterministic selection under
+`analysis/tmlr_manuscript/manuscript_inclusion_manifest.csv` and follow
+`docs/tmlr_manuscript_analysis_plan.md`. The full registry remains provenance;
+it is not necessary to adjudicate every historical artifact before drafting the
+main paper.
+
 ## 2. What the completed experiments currently show
 
 The central result is conditional, not universal:
