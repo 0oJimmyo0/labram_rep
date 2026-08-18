@@ -1,0 +1,13 @@
+backbone,dataset,axis,metric,n,seeds,effect_mean,effect_sd,positive_seed_count,effect_min,effect_max
+CBraMod,faced,channel_patch,balanced_accuracy,3,"42,1024,3407",0.00304169,0.00454342,2,-0.00107354,0.00791734
+CBraMod,faced,channel_patch,macro_f1,3,"42,1024,3407",0.00325100,0.00405039,3,0.00005005,0.00780463
+CBraMod,isruc,channel_patch,balanced_accuracy,3,"42,1024,3407",-0.00023992,0.01343692,1,-0.01350142,0.01336581
+CBraMod,isruc,channel_patch,macro_f1,3,"42,1024,3407",-0.00279219,0.01543005,1,-0.01786199,0.01297449
+CBraMod,physionet_mi,channel_patch,balanced_accuracy,3,"42,1024,3407",0.00716985,0.01239333,2,-0.00551740,0.01924670
+CBraMod,physionet_mi,channel_patch,macro_f1,3,"42,1024,3407",0.00667354,0.01543395,2,-0.00886000,0.02200594
+CBraMod,seedv,channel,balanced_accuracy,3,"42,1024,3407",-0.00874277,0.00424510,0,-0.01363195,-0.00599361
+CBraMod,seedv,channel,macro_f1,3,"42,1024,3407",-0.01363425,0.01402515,0,-0.02980137,-0.00473037
+CBraMod,tuev,channel_patch,balanced_accuracy,3,"42,1024,3407",-0.00320920,0.01937513,1,-0.02109775,0.01737103
+CBraMod,tuev,channel_patch,macro_f1,3,"42,1024,3407",-0.00435281,0.01712239,1,-0.01929088,0.01433303
+LaBraM,TUEV,channel_patch,balanced_accuracy,3,"42,1024,3407",-0.03913247,0.01744945,0,-0.04930485,-0.01898390
+LaBraM,TUEV,channel_patch,macro_f1,3,"42,1024,3407",-0.06528355,0.02501742,0,-0.08738595,-0.03812384

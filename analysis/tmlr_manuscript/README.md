@@ -1,4 +1,4 @@
-# Manuscript inclusion manifest
+# Manuscript inclusion manifest and final results
 
 Generated deterministically from complete canonical three-seed groups.
 Selection is based on prespecified manuscript role, not score.
@@ -6,8 +6,18 @@ Selection is based on prespecified manuscript role, not score.
 Selected run rows: 192
 Selected experimental groups: 64
 
-The rows remain `PRIMARY_CANDIDATE` and require focused audit before final manuscript use.
-The full 483-artifact registry remains the provenance layer.
+The compact manifest is the deterministic input selection. Its focused audit
+and manuscript aggregation are complete in `manuscript_final_v1/`.
+
+The full 483-artifact registry remains the provenance layer and is not a direct
+source for manuscript numbers.
+
+## Final snapshot
+
+Use `manuscript_final_v1/` for manuscript tables and paired effects. It
+contains artifact audit status, primary/supporting RQ2 pair review, RQ1/RQ2/RQ3
+seed-level effects, method summaries, efficiency fields, an analysis contract,
+and SHA256 checksums.
 
 | Backbone | Dataset | Role | Rows |
 |---|---|---|---:|
