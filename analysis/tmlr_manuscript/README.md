@@ -7,7 +7,23 @@ Selected run rows: 156
 Selected experimental groups: 52
 
 The rows remain `PRIMARY_CANDIDATE` and require focused audit before final manuscript use.
-The full 483-artifact registry remains the provenance layer.
+The full 485-artifact registry remains the provenance layer. A broader
+filesystem/log audit, including completed artifacts not yet in this registry,
+is maintained in `evidence_audit_20260825/`.
+
+## Evidence audit (2026-08-25)
+
+`evidence_audit_20260825/audit_report.md` inventories 769 experiment-like
+directories and 2,515 log/event files across CBraMod and LaBraM. It records
+485 registry-complete artifacts, six supplemental branch-local-MLP TUEV
+artifacts, two parity artifacts, 88 complete three-seed registry condition
+groups, and one incomplete legacy LaBraM--ISRUC aggregate row.
+
+The audit separates evidence availability from comparability. The manuscript
+primary matched RQ2 estimand remains the four cells CBraMod--FACED,
+CBraMod--ISRUC, CBraMod--TUEV, and LaBraM--TUEV. LaBraM--FACED,
+LaBraM--ISRUC, and LaBraM--SEED-V records are retained as supporting or
+geometry-boundary context, not silently promoted to matched RQ2 evidence.
 
 | Backbone | Dataset | Role | Rows |
 |---|---|---|---:|

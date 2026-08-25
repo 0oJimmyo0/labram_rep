@@ -1827,3 +1827,47 @@ CBraMod/ISRUC interpretation under the corrected r64 condition:
 `manuscript_final_v1` is retained as the superseded audit snapshot; v2 is the
 current manuscript-facing package. No additional CBraMod/ISRUC training is
 justified by these results.
+
+## Full cross-backbone evidence audit (2026-08-25)
+
+The claims-first manuscript manifest was not a complete inventory of the
+experiment store. A separate fail-closed audit is now maintained at
+`analysis/tmlr_manuscript/evidence_audit_20260825/`.
+
+The audit covers every experiment-like directory under both result stores and
+every `.out`, `.err`, `.vu`, and `log.txt` file under the CBraMod and LaBraM
+repositories:
+
+| Item | Audited count | Interpretation |
+|---|---:|---|
+| Experiment-like directories | 769 | 302 CBraMod result directories and 467 LaBraM checkpoint directories |
+| Registry artifacts | 485 | 271 CBraMod and 214 LaBraM records; all have a complete final test contract |
+| Supplemental completed artifacts | 8 | Six TUEV branch-local-MLP runs and two parity artifacts |
+| Log/event files | 2,515 | 2,047 textual logs plus 468 binary TensorBoard event files |
+| Registry aggregate conditions | 89 | 88 complete three-seed groups and one one-seed LaBraM--ISRUC legacy row |
+
+The ten-cell coverage table is
+`backbone_dataset_coverage.csv`. It distinguishes filesystem availability,
+completed test artifacts, three-seed completeness, matched-RQ2 eligibility,
+and manuscript role. The primary matched RQ2 cells remain exactly:
+CBraMod--FACED, CBraMod--ISRUC, CBraMod--TUEV, and LaBraM--TUEV.
+LaBraM--FACED, LaBraM--ISRUC, and LaBraM--SEED-V are retained as supporting or
+geometry-boundary context because their available records do not satisfy the
+same strict native-versus-axis-agnostic matched configuration contract.
+
+The log audit found 71 scheduler logs with failure markers: 51 traceback
+markers, 20 cancellation/termination markers, and smaller subsets containing
+runtime, value, import, or assertion errors. These logs are not promoted to
+results. The corresponding artifact table separates them from 485 completed
+registry artifacts and from 132 incomplete training directories, 31
+configuration-only/preflight directories, 56 legacy log-only directories, and
+26 audit/smoke directories. Failure counts are in
+`log_failure_summary.csv`; the full per-file inventory is in
+`log_inventory.csv`.
+
+This audit supersedes the former informal statement that the registry held
+483 artifacts. The registry currently holds 485; the six branch-local MLP
+artifacts are complete but remain supplemental because they were added after
+the older registry snapshot. Re-run `audit_full_evidence.py` after any new
+experiment, or use `--reuse-log-inventory` only when the log store itself has
+not changed.

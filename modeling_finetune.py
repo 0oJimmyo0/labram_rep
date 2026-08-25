@@ -297,8 +297,15 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         depth_dim=0,
         patch_variant="full",
         patch_output_dropout=0.0,
+        adapter_operator="attention",
     ):
         super().__init__()
+        adapter_operator = str(adapter_operator).strip().lower()
+        if adapter_operator not in {"attention", "mlp"}:
+            raise ValueError(
+                "adapter_operator must be 'attention' or 'mlp'; "
+                f"got {adapter_operator!r}"
+            )
         patch_variant = str(patch_variant).strip().lower()
         if patch_variant not in {"full", "output_dropout", "bottleneck", "low_rank"}:
             raise ValueError(
@@ -311,7 +318,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             )
         if int(bottleneck) <= 0:
             raise ValueError(f"bottleneck must be positive, got {bottleneck!r}")
-        if patch_variant == "low_rank" and int(bottleneck) % int(num_heads) != 0:
+        if adapter_operator == "attention" and patch_variant == "low_rank" and int(bottleneck) % int(num_heads) != 0:
             raise ValueError(
                 "low_rank adapter bottleneck must be divisible by the number of heads; "
                 f"got bottleneck={bottleneck}, num_heads={num_heads}"
@@ -327,6 +334,7 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
         if patch_variant != "full" and not (use_channel_mixer or use_patch_mixer):
             raise ValueError("A non-full adapter variant requires an enabled native-axis mixer")
         self.patch_variant = patch_variant
+        self.adapter_operator = adapter_operator
         self.patch_output_dropout_p = float(patch_output_dropout)
         self.depth_dim = int(depth_dim)
         self._last_raw_patch_ratio = None
@@ -335,7 +343,12 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
 
         if use_channel_mixer:
             self.channel_norm = nn.LayerNorm(dim)
-            if patch_variant == "low_rank":
+            if adapter_operator == "mlp":
+                self.channel_down = nn.Linear(dim, int(bottleneck))
+                self.channel_activation = nn.GELU()
+                self.channel_dropout = nn.Dropout(float(dropout))
+                self.channel_up = nn.Linear(int(bottleneck), dim)
+            elif patch_variant == "low_rank":
                 self.channel_down = nn.Linear(dim, int(bottleneck))
                 self.channel_attn = nn.MultiheadAttention(
                     embed_dim=int(bottleneck), num_heads=num_heads,
@@ -347,7 +360,13 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             self.alpha_channel = nn.Parameter(torch.tensor(float(init_alpha)))
 
         if use_patch_mixer:
-            if patch_variant in {"full", "output_dropout"}:
+            if adapter_operator == "mlp":
+                self.patch_norm = nn.LayerNorm(dim)
+                self.patch_down = nn.Linear(dim, int(bottleneck))
+                self.patch_activation = nn.GELU()
+                self.patch_dropout = nn.Dropout(float(dropout))
+                self.patch_up = nn.Linear(int(bottleneck), dim)
+            elif patch_variant in {"full", "output_dropout"}:
                 self.patch_norm = nn.LayerNorm(dim)
                 self.patch_attn = nn.MultiheadAttention(
                     embed_dim=dim, num_heads=num_heads, dropout=dropout, batch_first=True)
@@ -400,16 +419,30 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             "adapter_channel_count": channels,
             "adapter_patch_count": patches,
             "adapter_embed_dim": dim,
-            "channel_attention_sequence_length": channels if hasattr(self, "channel_attn") else None,
+            "channel_attention_sequence_length": channels if hasattr(self, "channel_attn") else 0,
+            "channel_mlp_sequence_length": channels if hasattr(self, "channel_down") and self.adapter_operator == "mlp" else 0,
             "channel_spatial_interactions_active": int(
                 hasattr(self, "channel_attn") and channels > 1
             ),
-            "patch_attention_sequence_length": patches,
-            "patch_temporal_interactions_active": int(patches > 1),
+            "patch_attention_sequence_length": patches if hasattr(self, "patch_attn") else 0,
+            "patch_mlp_sequence_length": patches if hasattr(self, "patch_down") and self.adapter_operator == "mlp" else 0,
+            "patch_temporal_interactions_active": int(hasattr(self, "patch_attn") and patches > 1),
+            "channel_axis_branch_active": int(self.adapter_operator == "mlp" and hasattr(self, "channel_down")),
+            "patch_axis_branch_active": int(self.adapter_operator == "mlp" and hasattr(self, "patch_down")),
         }
         delta = torch.zeros_like(x)
 
-        if hasattr(self, "channel_attn"):
+        if self.adapter_operator == "mlp" and hasattr(self, "channel_down"):
+            xc = x.permute(0, 2, 1, 3).reshape(batch_size * patches, channels, dim)
+            yc = self.channel_up(
+                self.channel_dropout(self.channel_activation(self.channel_down(self.channel_norm(xc))))
+            )
+            yc = yc.reshape(batch_size, patches, channels, dim).permute(0, 2, 1, 3)
+            self._last_raw_channel_ratio = float(
+                yc.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
+            )
+            delta = delta + self.alpha_channel * yc
+        elif hasattr(self, "channel_attn"):
             xc = x.permute(0, 2, 1, 3).reshape(batch_size * patches, channels, dim)
             xc = self.channel_norm(xc)
             if self.patch_variant == "low_rank":
@@ -423,7 +456,17 @@ class LaBraMNativeAxisResidualAdapter(nn.Module):
             )
             delta = delta + self.alpha_channel * yc
 
-        if hasattr(self, "patch_attn"):
+        if self.adapter_operator == "mlp" and hasattr(self, "patch_down"):
+            xp = x.reshape(batch_size * channels, patches, dim)
+            yp = self.patch_up(
+                self.patch_dropout(self.patch_activation(self.patch_down(self.patch_norm(xp))))
+            )
+            yp = yp.reshape(batch_size, channels, patches, dim)
+            self._last_raw_patch_ratio = float(
+                yp.detach().float().norm().div(x.detach().float().norm().clamp_min(1e-12)).cpu()
+            )
+            delta = delta + self.alpha_patch * yp
+        elif hasattr(self, "patch_attn"):
             xp = x.reshape(batch_size * channels, patches, dim)
             xp = self.patch_norm(xp)
             if self.patch_variant == "low_rank":
@@ -525,6 +568,7 @@ class NeuralTransformer(nn.Module):
                  use_mean_pooling=True, init_scale=0.001, adapter_type="none",
                  adapter_bottleneck=64, adapter_num_heads=4, adapter_dropout=0.0,
                  adapter_variant="full", adapter_patch_output_dropout=0.0,
+                 adapter_operator="attention",
                  adapter_init_alpha=0.01, adapter_gamma=1.0,
                  adapter_zero_init_output=False,
                  adapter_seed=12345,
@@ -596,6 +640,12 @@ class NeuralTransformer(nn.Module):
             raise ValueError("adapter_depth_mode must be 'none' or 'lastk_delta'")
         self.adapter_type = adapter_type
         self.adapter_variant = str(adapter_variant).strip().lower()
+        self.adapter_operator = str(adapter_operator).strip().lower()
+        if self.adapter_operator not in {"attention", "mlp"}:
+            raise ValueError(
+                "adapter_operator must be 'attention' or 'mlp'; "
+                f"got {adapter_operator!r}"
+            )
         if self.adapter_variant not in {"full", "output_dropout", "bottleneck", "low_rank"}:
             raise ValueError(
                 "adapter_variant must be one of: full, output_dropout, bottleneck, low_rank; "
@@ -659,6 +709,7 @@ class NeuralTransformer(nn.Module):
                     depth_dim=embed_dim if self.adapter_depth_mode != "none" else 0,
                     patch_variant=self.adapter_variant,
                     patch_output_dropout=self.adapter_patch_output_dropout,
+                    adapter_operator=self.adapter_operator,
                 )
                 self.native_axis_adapter.apply(self._init_weights)
                 if self.adapter_zero_init_output:
@@ -704,6 +755,7 @@ class NeuralTransformer(nn.Module):
                 "[LaBraM adapter] native structured residual enabled: "
                 f"type={self.adapter_type} gamma={self.adapter_gamma} "
                 f"variant={self.adapter_variant} patch_output_dropout={self.adapter_patch_output_dropout} "
+                f"operator={self.adapter_operator} "
                 f"bottleneck={adapter_bottleneck} "
                 f"token_mlp={bool(adapter_use_token_mlp or self.adapter_type == 'generic')} "
                 f"depth_mode={self.adapter_depth_mode} depth_k={self.adapter_depth_k} "

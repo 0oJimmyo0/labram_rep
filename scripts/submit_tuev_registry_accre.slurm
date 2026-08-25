@@ -64,6 +64,7 @@ TARGET_ADAPTER_PARAMS="${TARGET_ADAPTER_PARAMS:-}"
 
 ADAPTER_TYPE=none
 ADAPTER_VARIANT=full
+ADAPTER_OPERATOR=attention
 BACKBONE_MODE=trainable
 BACKBONE_LR_SCALE=1.0
 FROZEN_BACKBONE_EVAL_MODE=0
@@ -94,6 +95,15 @@ case "$METHOD" in
       exit 2
     fi
     ADAPTER_TYPE=generic; BACKBONE_MODE=frozen; BACKBONE_LR_SCALE=0.0
+    FROZEN_BACKBONE_EVAL_MODE=1
+    ;;
+  axis_decomposed_mlp)
+    if [[ -z "$TARGET_ADAPTER_PARAMS" ]]; then
+      echo "ERROR: axis_decomposed_mlp requires TARGET_ADAPTER_PARAMS from the native run." >&2
+      exit 2
+    fi
+    ADAPTER_TYPE=channel_patch; ADAPTER_VARIANT=low_rank; ADAPTER_OPERATOR=mlp
+    BACKBONE_MODE=frozen; BACKBONE_LR_SCALE=0.0
     FROZEN_BACKBONE_EVAL_MODE=1
     ;;
   lora)
@@ -139,7 +149,7 @@ module load gentoo/2023 gcc/12.3 python/3.11.5 scipy-stack/2026a >/dev/null 2>&1
 export PYTHONNOUSERSITE=1
 source "$ENV_DIR/bin/activate"
 cd "$REPO_DIR"
-export DATA_DIR METHOD ADAPTER_TYPE ADAPTER_VARIANT BACKBONE_MODE ADAPTER_DEPTH_MODE \
+export DATA_DIR METHOD ADAPTER_TYPE ADAPTER_VARIANT ADAPTER_OPERATOR BACKBONE_MODE ADAPTER_DEPTH_MODE \
   ADAPTER_BOTTLENECK ADAPTER_HEADS ADAPTER_DROPOUT ADAPTER_INIT_ALPHA ADAPTER_GAMMA \
   ADAPTER_DEPTH_K LORA_RANK LORA_ALPHA LORA_DROPOUT LORA_TARGET
 export TARGET_ADAPTER_PARAMS
@@ -156,6 +166,7 @@ root = os.environ['DATA_DIR']
 method = os.environ['METHOD']
 adapter_type = os.environ['ADAPTER_TYPE']
 adapter_variant = os.environ['ADAPTER_VARIANT']
+adapter_operator = os.environ['ADAPTER_OPERATOR']
 backbone_mode = os.environ['BACKBONE_MODE']
 depth_mode = os.environ['ADAPTER_DEPTH_MODE']
 train, test, val = prepare_TUEV_dataset(root)
@@ -169,6 +180,7 @@ model = labram_base_patch200_200(
     num_classes=6, qkv_bias=False, use_abs_pos_emb=True,
     use_rel_pos_bias=False, init_values=0.1,
     adapter_type=adapter_type, adapter_variant=adapter_variant,
+    adapter_operator=adapter_operator,
     adapter_bottleneck=int(os.environ['ADAPTER_BOTTLENECK']),
     adapter_num_heads=int(os.environ['ADAPTER_HEADS']),
     adapter_dropout=float(os.environ['ADAPTER_DROPOUT']),
@@ -191,10 +203,16 @@ diag = model.get_adapter_diagnostics()
 if adapter_type != 'none':
     assert diag['adapter_channel_count'] == 16, diag
     assert diag['adapter_patch_count'] == 5, diag
-    if adapter_type in ('channel', 'channel_patch'):
-        assert diag['channel_spatial_interactions_active'] == 1, diag
-    if adapter_type in ('patch', 'channel_patch'):
-        assert diag['patch_temporal_interactions_active'] == 1, diag
+    if adapter_operator == 'attention':
+        if adapter_type in ('channel', 'channel_patch'):
+            assert diag['channel_spatial_interactions_active'] == 1, diag
+        if adapter_type in ('patch', 'channel_patch'):
+            assert diag['patch_temporal_interactions_active'] == 1, diag
+    else:
+        if adapter_type in ('channel', 'channel_patch'):
+            assert diag['channel_axis_branch_active'] == 1, diag
+        if adapter_type in ('patch', 'channel_patch'):
+            assert diag['patch_axis_branch_active'] == 1, diag
 if depth_mode != 'none':
     assert adapter_type == 'channel_patch'
 if method == 'axis_blind':
@@ -208,11 +226,22 @@ if method == 'axis_blind':
     assert not hasattr(model.native_axis_adapter, 'channel_attn')
     assert not hasattr(model.native_axis_adapter, 'patch_attn')
     assert hasattr(model.native_axis_adapter, 'token_mlp')
+if method == 'axis_decomposed_mlp':
+    target = int(os.environ['TARGET_ADAPTER_PARAMS'])
+    actual = sum(p.numel() for p in model.native_axis_adapter.parameters())
+    relative_error = abs(actual - target) / max(1, target)
+    assert relative_error <= 0.05, (actual, target, relative_error)
+    assert adapter_type == 'channel_patch'
+    assert adapter_operator == 'mlp'
+    assert not hasattr(model.native_axis_adapter, 'channel_attn')
+    assert not hasattr(model.native_axis_adapter, 'patch_attn')
+    assert hasattr(model.native_axis_adapter, 'channel_down')
+    assert hasattr(model.native_axis_adapter, 'patch_down')
 print('python:', sys.executable)
 print('torch:', torch.__version__)
 print('TUEV registry preflight:', {
     'method': method, 'backbone_mode': backbone_mode,
-    'adapter_type': adapter_type, 'adapter_variant': adapter_variant,
+    'adapter_type': adapter_type, 'adapter_variant': adapter_variant, 'adapter_operator': adapter_operator,
     'depth_mode': depth_mode, 'train': len(train), 'val': len(val),
     'test': len(test), 'sample_shape': tuple(x.shape),
     'token_grid': tuple(features.shape),
@@ -223,7 +252,7 @@ print('TUEV registry preflight:', {
 PY
 nvidia-smi || true
 
-echo "TUEV LaBraM registry launch: method=$METHOD seed=$SEED backbone=$BACKBONE_MODE adapter=$ADAPTER_TYPE variant=$ADAPTER_VARIANT depth=$ADAPTER_DEPTH_MODE batch=$BATCH_SIZE epochs=$EPOCHS lr=$LR workers=$NUM_WORKERS scale=$INPUT_SCALE_DIVISOR" >&2
+echo "TUEV LaBraM registry launch: method=$METHOD seed=$SEED backbone=$BACKBONE_MODE adapter=$ADAPTER_TYPE variant=$ADAPTER_VARIANT operator=$ADAPTER_OPERATOR depth=$ADAPTER_DEPTH_MODE batch=$BATCH_SIZE epochs=$EPOCHS lr=$LR workers=$NUM_WORKERS scale=$INPUT_SCALE_DIVISOR" >&2
 echo "git_commit: $(git rev-parse HEAD)" >&2
 git status --short >&2
 echo "checkpoint_sha256: $(sha256sum ./checkpoints/labram-base.pth | awk '{print $1}')" >&2
@@ -232,6 +261,7 @@ echo "run_id: $RUN_ID" >&2
 PYTHON_ARGS=(
   --labram_adapter_type "$ADAPTER_TYPE"
   --labram_adapter_variant "$ADAPTER_VARIANT"
+  --labram_adapter_operator "$ADAPTER_OPERATOR"
   --labram_adapter_bottleneck "$ADAPTER_BOTTLENECK"
   --labram_adapter_heads "$ADAPTER_HEADS"
   --labram_adapter_dropout "$ADAPTER_DROPOUT"

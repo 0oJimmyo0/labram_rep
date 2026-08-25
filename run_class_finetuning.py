@@ -158,6 +158,9 @@ def get_args():
     parser.add_argument('--labram_adapter_variant', default='full',
                         choices=['full', 'output_dropout', 'bottleneck', 'low_rank'],
                         help='Native-axis branch variant: full-width attention, output dropout, singleton bottleneck, or low-rank Down-Mixer-Up.')
+    parser.add_argument('--labram_adapter_operator', default='attention',
+                        choices=['attention', 'mlp'],
+                        help='Operator used inside native channel/patch branches.')
     parser.add_argument('--labram_adapter_patch_output_dropout', default=0.0, type=float,
                         help='Dropout applied to the patch branch output after attention.')
     parser.add_argument('--labram_adapter_init_alpha', default=0.01, type=float,
@@ -388,6 +391,7 @@ def get_models(args):
         adapter_num_heads=args.labram_adapter_heads,
         adapter_dropout=args.labram_adapter_dropout,
         adapter_variant=args.labram_adapter_variant,
+        adapter_operator=args.labram_adapter_operator,
         adapter_patch_output_dropout=args.labram_adapter_patch_output_dropout,
         adapter_init_alpha=args.labram_adapter_init_alpha,
         adapter_gamma=args.labram_adapter_gamma,
@@ -784,6 +788,27 @@ def main(args, ds_init):
             raise ValueError('axis_blind must not instantiate channel or patch attention')
         if not hasattr(adapter_module, 'token_mlp'):
             raise ValueError('axis_blind requires the token MLP residual branch')
+    if args.experiment_method == 'axis_decomposed_mlp':
+        if args.labram_backbone_mode != 'frozen' or args.labram_adapter_type != 'channel_patch':
+            raise ValueError('axis_decomposed_mlp requires frozen backbone plus channel_patch adapter')
+        if args.labram_adapter_operator != 'mlp':
+            raise ValueError('axis_decomposed_mlp requires --labram_adapter_operator mlp')
+        if args.target_adapter_params is None:
+            raise ValueError('axis_decomposed_mlp requires --target_adapter_params')
+        adapter_module = model.native_axis_adapter
+        actual_adapter_params = sum(p.numel() for p in adapter_module.parameters())
+        relative_error = abs(actual_adapter_params - args.target_adapter_params) / max(
+            1, args.target_adapter_params
+        )
+        if relative_error > 0.05:
+            raise ValueError(
+                f'axis_decomposed_mlp adapter count mismatch: actual={actual_adapter_params} '
+                f'target={args.target_adapter_params} relative_error={relative_error:.6f}'
+            )
+        if hasattr(adapter_module, 'channel_attn') or hasattr(adapter_module, 'patch_attn'):
+            raise ValueError('axis_decomposed_mlp must not instantiate channel or patch attention')
+        if not hasattr(adapter_module, 'channel_down') or not hasattr(adapter_module, 'patch_down'):
+            raise ValueError('axis_decomposed_mlp requires both native axis MLP branches')
 
     model.to(device)
 
@@ -1038,6 +1063,7 @@ def main(args, ds_init):
         ),
         'adapter_type': args.labram_adapter_type,
         'adapter_variant': args.labram_adapter_variant,
+        'adapter_operator': args.labram_adapter_operator,
         'adapter_patch_output_dropout': float(args.labram_adapter_patch_output_dropout),
         'adapter_bottleneck': int(args.labram_adapter_bottleneck),
         'adapter_heads': int(args.labram_adapter_heads),

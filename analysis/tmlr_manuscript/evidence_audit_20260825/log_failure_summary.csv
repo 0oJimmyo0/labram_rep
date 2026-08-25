@@ -1,0 +1,7 @@
+failure_marker,log_kind,count
+assertion,scheduler_output_log,2
+import_error,scheduler_output_log,3
+interrupt,scheduler_output_log,20
+runtime_error,scheduler_output_log,9
+traceback,scheduler_output_log,51
+value_error,scheduler_output_log,5

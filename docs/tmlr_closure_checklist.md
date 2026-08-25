@@ -252,3 +252,29 @@ rows, 12 valid primary RQ2 seed-pairs, and complete primary RQ2 cells for
 CBraMod/FACED, CBraMod/ISRUC, CBraMod/TUEV, and LaBraM/TUEV. The self-check
 passes with zero errors and zero warnings. `manuscript_final_v1` remains the
 superseded pre-repair snapshot and is not overwritten.
+
+## Full evidence audit checkpoint (2026-08-25)
+
+The broader evidence audit is now complete and is stored in
+`analysis/tmlr_manuscript/evidence_audit_20260825/`.
+
+- 769 experiment-like directories and 2,515 log/event files were inventoried
+  across CBraMod and LaBraM.
+- The provenance registry contains 485 completed artifacts: 271 CBraMod and
+  214 LaBraM. The earlier README count of 483 was stale.
+- The registry aggregate contains 89 condition rows; 88 are complete
+  three-seed groups, and one LaBraM--ISRUC dense row is a one-seed legacy
+  record.
+- Six completed branch-local-MLP TUEV runs and two parity artifacts are
+  supplemental and remain outside the older registry snapshot.
+- The primary matched RQ2 scope remains the four cells CBraMod--FACED,
+  CBraMod--ISRUC, CBraMod--TUEV, and LaBraM--TUEV.
+- LaBraM--FACED, LaBraM--ISRUC, and LaBraM--SEED-V are available as supporting
+  or geometry-boundary context, but are not strict matched RQ2 cells.
+- Seventy-one scheduler logs contain failure markers. They are classified in
+  `log_failure_summary.csv` and are not treated as results.
+
+Use `audit_report.md` and `backbone_dataset_coverage.csv` as the canonical
+coverage references. The audit is intentionally separate from the
+claims-focused manuscript inclusion manifest: availability and completion do
+not imply comparability or eligibility for the primary estimand.

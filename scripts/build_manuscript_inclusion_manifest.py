@@ -246,6 +246,7 @@ def main():
 
     OUT.mkdir(parents=True, exist_ok=True)
     write_csv(OUT / "manuscript_inclusion_manifest.csv", output_rows)
+    registry_count = len(read_csv(REGISTRY / "all_artifacts.csv"))
 
     summary = defaultdict(int)
     for row in output_rows:
@@ -267,7 +268,7 @@ def main():
         f"Selected experimental groups: {len({(r['backbone'], r['dataset'], r['method'], r['variant']) for r in output_rows})}",
         "",
         "The rows remain `PRIMARY_CANDIDATE` and require focused audit before final manuscript use.",
-        "The full 483-artifact registry remains the provenance layer.",
+        f"The full {registry_count}-artifact registry remains the provenance layer.",
         "",
         "| Backbone | Dataset | Role | Rows |",
         "|---|---|---|---:|",

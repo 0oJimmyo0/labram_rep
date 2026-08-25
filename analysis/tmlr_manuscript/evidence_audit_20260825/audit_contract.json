@@ -1,0 +1,29 @@
+{
+  "status": "complete",
+  "audit_date": "2026-08-25",
+  "seeds": [
+    42,
+    1024,
+    3407
+  ],
+  "artifact_directories_audited": 769,
+  "registry_artifacts": 485,
+  "registry_complete_artifacts": 485,
+  "supplemental_complete_artifacts": 8,
+  "log_files_audited": 2515,
+  "registry_condition_rows": 89,
+  "complete_three_seed_registry_condition_rows": 88,
+  "supplemental_condition_rows": 13,
+  "primary_rq2_cells": [
+    "CBraMod-FACED",
+    "CBraMod-ISRUC",
+    "CBraMod-TUEV",
+    "LaBraM-TUEV"
+  ],
+  "test_metrics_used_for_selection": false,
+  "notes": [
+    "A completed checkpoint/test contract is required for complete status.",
+    "Supporting legacy records are retained but not promoted to matched RQ2 evidence.",
+    "Macro-F1 values are complemented only from the existing manuscript-v2/v3 audited tables when the raw registry aggregate is missing a scalar; the source column records this explicitly."
+  ]
+}
