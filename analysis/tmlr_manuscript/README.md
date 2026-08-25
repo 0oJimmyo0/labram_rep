@@ -1,23 +1,13 @@
-# Manuscript inclusion manifest and final results
+# Manuscript inclusion manifest
 
 Generated deterministically from complete canonical three-seed groups.
 Selection is based on prespecified manuscript role, not score.
 
-Selected run rows: 192
-Selected experimental groups: 64
+Selected run rows: 156
+Selected experimental groups: 52
 
-The compact manifest is the deterministic input selection. Its focused audit
-and manuscript aggregation are complete in `manuscript_final_v1/`.
-
-The full 483-artifact registry remains the provenance layer and is not a direct
-source for manuscript numbers.
-
-## Final snapshot
-
-Use `manuscript_final_v1/` for manuscript tables and paired effects. It
-contains artifact audit status, primary/supporting RQ2 pair review, RQ1/RQ2/RQ3
-seed-level effects, method summaries, efficiency fields, an analysis contract,
-and SHA256 checksums.
+The rows remain `PRIMARY_CANDIDATE` and require focused audit before final manuscript use.
+The full 483-artifact registry remains the provenance layer.
 
 | Backbone | Dataset | Role | Rows |
 |---|---|---|---:|
@@ -25,19 +15,15 @@ and SHA256 checksums.
 | CBraMod | faced | RQ1 | 6 |
 | CBraMod | faced | RQ2 | 6 |
 | CBraMod | faced | RQ3 | 9 |
-| CBraMod | isruc | CONTEXT | 6 |
 | CBraMod | isruc | RQ1 | 6 |
 | CBraMod | isruc | RQ2 | 6 |
-| CBraMod | isruc | RQ3 | 9 |
-| CBraMod | physionet_mi | BOUNDARY | 12 |
+| CBraMod | physionet_mi | BOUNDARY | 9 |
 | CBraMod | physionet_mi | CONTEXT | 6 |
 | CBraMod | physionet_mi | RQ1 | 6 |
-| CBraMod | physionet_mi | RQ2 | 6 |
-| CBraMod | physionet_mi | RQ3 | 9 |
+| CBraMod | physionet_mi | RQ3 | 3 |
 | CBraMod | seedv | BOUNDARY | 12 |
 | CBraMod | seedv | CONTEXT | 6 |
 | CBraMod | seedv | RQ1 | 6 |
-| CBraMod | seedv | RQ2 | 6 |
 | CBraMod | seedv | RQ3 | 9 |
 | CBraMod | tuev | CONTEXT | 6 |
 | CBraMod | tuev | RQ1 | 6 |
@@ -50,10 +36,10 @@ and SHA256 checksums.
 | LaBraM | PhysioNet-MI | CONTEXT | 6 |
 | LaBraM | PhysioNet-MI | RQ1 | 6 |
 | LaBraM | PhysioNet-MI | RQ3 | 9 |
-| LaBraM | SEED-V | BOUNDARY | 6 |
+| LaBraM | SEED-V | BOUNDARY | 3 |
 | LaBraM | SEED-V | CONTEXT | 6 |
-| LaBraM | SEED-V | RQ3 | 6 |
+| LaBraM | SEED-V | RQ3 | 3 |
 | LaBraM | TUEV | CONTEXT | 6 |
 | LaBraM | TUEV | RQ1 | 6 |
 | LaBraM | TUEV | RQ2 | 6 |
-| LaBraM | TUEV | RQ3 | 9 |
+| LaBraM | TUEV | RQ3 | 3 |

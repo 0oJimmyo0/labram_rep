@@ -1,21 +1,26 @@
 {
-  "version": "manuscript_final_v1",
-  "created_utc": "2026-08-22T02:01:28.244891+00:00",
+  "version": "manuscript_final_v2",
+  "created_utc": "2026-08-22T03:50:31.622264+00:00",
   "source_manifest": "/panfs/accrepfs.vampire/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM/analysis/tmlr_manuscript/manuscript_inclusion_manifest.csv",
-  "source_manifest_sha256": "8b89dfe23e3503b5fde2380ef017de90877c4fb8fd2c009b97c3a400ec9558c7",
-  "selected_rows": 159,
+  "source_manifest_sha256": "0b2a9dea7ad9cd4464191cf73be3032f83266f0d8056f7daedeac139cc580615",
+  "selected_rows": 156,
   "artifact_status_counts": {
     "SUPPORTING": 12,
-    "VERIFIED": 147
+    "VERIFIED": 144
   },
   "pair_status_counts": {
-    "primary:VALID": 9
+    "primary:VALID": 12
   },
-  "primary_rq2_pair_rows": 9,
+  "primary_rq2_pair_rows": 12,
   "primary_rq2_complete_seed_cells": [
     {
       "backbone": "CBraMod",
       "dataset": "faced",
+      "axis": "channel_patch"
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "isruc",
       "axis": "channel_patch"
     },
     {
@@ -29,17 +34,11 @@
       "axis": "channel_patch"
     }
   ],
-  "primary_rq2_exclusions": [
-    {
-      "backbone": "CBraMod",
-      "dataset": "isruc",
-      "reason": "three seeds exist, but the native channel+patch group mixes bottleneck 64 at seed 42 with bottleneck 32 at seeds 1024 and 3407; the group is excluded as configuration-inhomogeneous"
-    }
-  ],
-  "rq1_seed_effect_rows": 36,
-  "rq2_seed_effect_rows": 18,
-  "rq2_all_seed_effect_rows": 18,
-  "rq3_seed_effect_rows": 60,
+  "primary_rq2_exclusions": [],
+  "rq1_seed_effect_rows": 42,
+  "rq2_seed_effect_rows": 24,
+  "rq2_all_seed_effect_rows": 24,
+  "rq3_seed_effect_rows": 66,
   "primary_metrics": [
     "balanced_accuracy",
     "macro_f1"

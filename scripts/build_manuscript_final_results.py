@@ -14,6 +14,7 @@ import csv
 import hashlib
 import json
 import math
+import os
 import shutil
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -22,7 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "analysis" / "tmlr_manuscript" / "manuscript_inclusion_manifest.csv"
-OUT = ROOT / "analysis" / "tmlr_manuscript" / "manuscript_final_v1"
+FINAL_VERSION = os.environ.get("TMLR_MANUSCRIPT_VERSION", "v1")
+OUT = ROOT / "analysis" / "tmlr_manuscript" / f"manuscript_final_{FINAL_VERSION}"
 SEEDS = {"42", "1024", "3407"}
 METRICS = ("balanced_accuracy", "macro_f1", "cohen_kappa", "weighted_f1")
 
@@ -114,6 +116,29 @@ def source_metrics(row):
         "selected_epoch": None,
         "selection_metric": final.get("selection_metric", "cohen_kappa"),
     }
+
+
+def source_adapter_parameter_count(row):
+    """Return the adaptation-module count used for the RQ2 capacity match."""
+    source = Path(row["source_artifact"])
+    if row["backbone"] == "CBraMod":
+        report_path = source / "trainability_report.json"
+        if report_path.exists():
+            report = load_json(report_path)
+            components = report.get("component_trainable_parameter_counts", {})
+            if components.get("adapter") is not None:
+                return int(components["adapter"]) + int(components.get("adapter_scalar", 0) or 0)
+        report_path = source / "checkpoint_load_report.json"
+        if report_path.exists():
+            report = load_json(report_path)
+            if report.get("adapter_parameter_count") is not None:
+                return int(report["adapter_parameter_count"])
+        return None
+    config = load_json(source / "run_config.json")
+    for key in ("trainable_adapter_parameters", "adapter_parameter_count"):
+        if config.get(key) is not None:
+            return int(config[key])
+    return None
 
 
 def dataset_audit_passes(dataset_audit):
@@ -218,6 +243,8 @@ def artifact_audit(rows):
                 if fraction in ("", None) and total_parameters not in ("", None):
                     fraction = float(row["trainable_parameters"]) / float(total_parameters)
             out["source_trainable_parameter_fraction"] = str(fraction)
+            adapter_parameters = source_adapter_parameter_count(row)
+            out["source_adapter_parameter_count"] = "" if adapter_parameters is None else str(adapter_parameters)
             out["source_total_parameters"] = str(total_parameters)
             if row["backbone"] == "CBraMod":
                 timing = load_json(Path(row["source_artifact"]) / "timing.json")
@@ -258,7 +285,12 @@ def pair_audit(left, right, left_status, right_status):
         notes.append("seed mismatch")
     if left.get("trainability_regime") != right.get("trainability_regime"):
         notes.append("trainability mismatch")
-    match = number(left.get("parameter_match_pct"))
+    left_adapter = number(left.get("source_adapter_parameter_count"))
+    right_adapter = number(right.get("source_adapter_parameter_count"))
+    if left_adapter is None or right_adapter is None or left_adapter == 0:
+        match = None
+    else:
+        match = abs(left_adapter - right_adapter) / abs(left_adapter) * 100.0
     if match is None or match > 5.0:
         notes.append("parameter mismatch exceeds 5 percent or is unavailable")
 
@@ -311,7 +343,8 @@ def pair_audit(left, right, left_status, right_status):
         "seed": left["seed"],
         "native_run_id": left["run_id"],
         "axisblind_run_id": right["run_id"],
-        "parameter_match_pct": left.get("parameter_match_pct", ""),
+        "parameter_match_pct": "" if match is None else f"{match:.12g}",
+        "parameter_matching_basis": "adapter_module_parameters",
         "pair_status": status,
         "analysis_scope": scope,
         "pair_audit_notes": "all focused pair checks passed" if not notes else "; ".join(notes),
@@ -461,7 +494,18 @@ def main():
     rq2 = effect_rows(audited, by_run, "rq2")
     rq3 = rq3_rows(audited)
     rq1_summary = summarize_effects(rq1, "effect_native_minus_probe")
-    rq2_primary = [row for row in rq2 if row.get("analysis_scope") == "primary"]
+    primary_seed_sets = defaultdict(set)
+    for row in rq2:
+        if row.get("analysis_scope") == "primary":
+            primary_seed_sets[(row["backbone"], row["dataset"], row["axis"])].add(row["seed"])
+    complete_primary_cells = {
+        cell for cell, seeds in primary_seed_sets.items() if set(seeds) == SEEDS
+    }
+    rq2_primary = [
+        row for row in rq2
+        if row.get("analysis_scope") == "primary"
+        and (row["backbone"], row["dataset"], row["axis"]) in complete_primary_cells
+    ]
     rq2_supporting = [row for row in rq2 if row.get("analysis_scope") != "primary"]
     rq2_summary = summarize_effects(rq2_primary, "effect_native_minus_axisblind")
     rq2_all_summary = summarize_effects(rq2, "effect_native_minus_axisblind")
@@ -503,15 +547,30 @@ def main():
     pair_counts = defaultdict(int)
     for row in pairs:
         pair_counts[f"{row['analysis_scope']}:{row['pair_status']}"] += 1
+    primary_exclusions = []
+    if ("CBraMod", "isruc", "channel_patch") not in complete_primary_cells:
+        primary_exclusions.append({
+            "backbone": "CBraMod",
+            "dataset": "isruc",
+            "reason": "three seeds exist, but the native channel+patch group is configuration-inhomogeneous",
+        })
     contract = {
-        "version": "manuscript_final_v1",
+        "version": f"manuscript_final_{FINAL_VERSION}",
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "source_manifest": str(MANIFEST),
         "source_manifest_sha256": sha256(MANIFEST),
         "selected_rows": len(rows),
         "artifact_status_counts": dict(sorted(status_counts.items())),
         "pair_status_counts": dict(sorted(pair_counts.items())),
-        "primary_rq2_pair_rows": sum(row["analysis_scope"] == "primary" and row["pair_status"] == "VALID" for row in pairs),
+        "primary_rq2_pair_rows": len({
+            (row["backbone"], row["dataset"], row["axis"], row["seed"])
+            for row in rq2_primary
+        }),
+        "primary_rq2_complete_seed_cells": [
+            {"backbone": backbone, "dataset": dataset, "axis": axis}
+            for backbone, dataset, axis in sorted(complete_primary_cells)
+        ],
+        "primary_rq2_exclusions": primary_exclusions,
         "rq1_seed_effect_rows": len(rq1),
         "rq2_seed_effect_rows": len(rq2_primary),
         "rq2_all_seed_effect_rows": len(rq2),
@@ -520,12 +579,37 @@ def main():
         "secondary_metrics": ["cohen_kappa", "weighted_f1"],
         "selection_metric": "validation_kappa",
         "seeds": [42, 1024, 3407],
-        "scope_rule": "primary RQ2 is FACED/ISRUC/TUEV plus valid LaBraM TUEV; SEED-V and PhysioNet-MI remain boundary/supporting",
+        "scope_rule": "primary RQ2 contains only complete-seed valid cells from the candidate FACED/ISRUC/TUEV plus LaBraM TUEV scope; SEED-V and PhysioNet-MI remain boundary/supporting",
+        "parameter_matching_basis": "adapter_module_parameters; shared classifier excluded from the capacity criterion",
         "score_selection": "none; rows come from the deterministic compact manifest",
     }
     (OUT / "analysis_contract.json").write_text(json.dumps(contract, indent=2) + "\n")
 
-    readme = f"""# Manuscript-final results snapshot v1\n\nThis is the focused results package generated from the deterministic compact\nmanuscript manifest. It does not modify the broad provenance registry.\n\n- Selected rows: {len(rows)}\n- Artifact statuses: {dict(sorted(status_counts.items()))}\n- Pair statuses: {dict(sorted(pair_counts.items()))}\n- Primary RQ2 pair rows: {contract['primary_rq2_pair_rows']}\n- Primary RQ2 metric rows: {contract['rq2_seed_effect_rows']}\n- RQ3 metric rows: {contract['rq3_seed_effect_rows']}\n\nPrimary RQ2 includes only valid matched pairs from FACED, ISRUC, TUEV, and\nLaBraM TUEV. SEED-V is a geometry/protocol boundary case; PhysioNet-MI is a\nbounded supporting extension. No row was selected by score.\n\nKey files:\n\n- `method_summary.csv`: overall performance, parameter, memory, and timing table.\n- `rq1_effect_summary.csv`: native adaptation minus frozen probe.\n- `rq2_effect_summary.csv`: primary native-minus-axis-blind effects only.\n- `rq2_all_effect_summary.csv`: primary plus boundary/supporting RQ2 effects.\n- `rq3_effect_summary.csv`: separate frozen and full-backbone contrasts.\n- `artifact_audit.csv` and `rq2_pair_audit.csv`: provenance and inclusion checks.\n\nHistorical per-epoch test trajectories and diagnostics remain supplementary.\n"""
+    complete_cells_text = ", ".join(
+        f"{backbone}/{dataset}/{axis}"
+        for backbone, dataset, axis in sorted(complete_primary_cells)
+    )
+    exclusion_text = ""
+    if primary_exclusions:
+        exclusion_text = "\nThe following candidate cell remains excluded: " + "; ".join(
+            f"{item['backbone']}/{item['dataset']} ({item['reason']})"
+            for item in primary_exclusions
+        ) + "\n"
+    readme = f"""# Manuscript-final results snapshot {FINAL_VERSION}\n\nThis is the focused results package generated from the deterministic compact\nmanuscript manifest. It does not modify the broad provenance registry.\n\n- Selected rows: {len(rows)}\n- Artifact statuses: {dict(sorted(status_counts.items()))}\n- Pair statuses: {dict(sorted(pair_counts.items()))}\n- Primary RQ2 pair rows: {contract['primary_rq2_pair_rows']}\n- Primary RQ2 metric rows: {contract['rq2_seed_effect_rows']}\n- RQ3 metric rows: {contract['rq3_seed_effect_rows']}\n\nPrimary RQ2 includes complete-seed valid matched pairs in {complete_cells_text}.{exclusion_text}\nNo row was selected by score.\n\nKey files:\n\n- `method_summary.csv`: overall performance, parameter, memory, and timing table.\n- `rq1_effect_summary.csv`: native adaptation minus frozen probe.\n- `rq2_effect_summary.csv`: primary native-minus-axis-blind effects only.\n- `rq2_all_effect_summary.csv`: primary plus boundary/supporting RQ2 effects.\n- `rq3_effect_summary.csv`: separate frozen and full-backbone contrasts.\n- `artifact_audit.csv` and `rq2_pair_audit.csv`: provenance and inclusion checks.\n\nHistorical per-epoch test trajectories and diagnostics remain supplementary.\n"""
+    readme = readme.replace(
+        "Historical per-epoch test trajectories and diagnostics remain supplementary.",
+        "RQ2 parameter matching is computed from recorded adaptation-module parameter "
+        "counts; total trainable parameters remain reported separately.\n\n"
+        "Historical per-epoch test trajectories and diagnostics remain supplementary.",
+    )
+    complete_cells_text = ", ".join(
+        f"{backbone}/{dataset}/{axis}"
+        for backbone, dataset, axis in sorted(complete_primary_cells)
+    )
+    readme = readme.replace(
+        "Primary RQ2 includes only valid matched pairs from FACED, ISRUC, TUEV, and\nLaBraM TUEV. SEED-V is a geometry/protocol boundary case; PhysioNet-MI is a\nbounded supporting extension. No row was selected by score.",
+        f"Primary RQ2 includes complete-seed valid matched pairs in {complete_cells_text}.\nISRUC has three-seed artifacts, but its native channel+patch group mixes\nbottleneck settings across seeds and is therefore excluded from the final\ncomparison. SEED-V is a geometry/protocol boundary case; PhysioNet-MI is a\nbounded supporting extension. No row was selected by score.",
+    )
     (OUT / "README.md").write_text(readme)
     output_files = sorted(path for path in OUT.iterdir() if path.is_file() and path.name != "SHA256SUMS")
     (OUT / "SHA256SUMS").write_text("\n".join(f"{sha256(path)}  {path.name}" for path in output_files) + "\n")

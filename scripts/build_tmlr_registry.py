@@ -94,6 +94,11 @@ def cb_candidate_score(dataset, run_id, method, seed):
         score += 100
     if dataset == "isruc" and "_b8_e20" in run_id:
         score += 100
+    # The ISRUC axis-blind reference is the locked alpha=0 packet.  Prefer
+    # that complete, homogeneous packet over the earlier seed-42 exploratory
+    # control, whose omitted alpha-decay field makes the group mixed.
+    if dataset == "isruc" and method == "axis_blind":
+        score += 101 if "alpha0" in run_id else -100
     if dataset == "physionet_mi" and "lr2e-4_b64_e40" in run_id:
         score += 100
     if "_lr1e-4_" in run_id:

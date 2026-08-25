@@ -1743,9 +1743,9 @@
     "trainable_parameters": 21647410,
     "adapter_delta_ratio": null,
     "backbone_update_norm": 0.0,
-    "candidate_score": 102,
+    "candidate_score": 2,
     "source": "summary.json + test_metrics.json",
-    "candidate": true
+    "candidate": false
   },
   {
     "backbone": "CBraMod",
@@ -2111,9 +2111,9 @@
     "trainable_parameters": 21647410,
     "adapter_delta_ratio": null,
     "backbone_update_norm": 0.0,
-    "candidate_score": 2,
+    "candidate_score": 103,
     "source": "summary.json + test_metrics.json",
-    "candidate": false
+    "candidate": true
   },
   {
     "backbone": "CBraMod",
@@ -2389,7 +2389,7 @@
     "backbone_update_norm": 0.0,
     "candidate_score": 2,
     "source": "summary.json + test_metrics.json",
-    "candidate": true
+    "candidate": false
   },
   {
     "backbone": "CBraMod",
@@ -2412,7 +2412,7 @@
     "backbone_update_norm": 0.0,
     "candidate_score": 2,
     "source": "summary.json + test_metrics.json",
-    "candidate": true
+    "candidate": false
   },
   {
     "backbone": "CBraMod",
@@ -2479,7 +2479,7 @@
     "trainable_parameters": 21647410,
     "adapter_delta_ratio": null,
     "backbone_update_norm": 0.0,
-    "candidate_score": 2,
+    "candidate_score": 103,
     "source": "summary.json + test_metrics.json",
     "candidate": true
   },
@@ -2502,7 +2502,7 @@
     "trainable_parameters": 21647410,
     "adapter_delta_ratio": null,
     "backbone_update_norm": 0.0,
-    "candidate_score": 2,
+    "candidate_score": 103,
     "source": "summary.json + test_metrics.json",
     "candidate": true
   },
@@ -2733,6 +2733,52 @@
     "adapter_delta_ratio": 0.0033445016015321016,
     "backbone_update_norm": 0.04153861850500107,
     "candidate_score": 2,
+    "source": "summary.json + test_metrics.json",
+    "candidate": true
+  },
+  {
+    "backbone": "CBraMod",
+    "dataset": "isruc",
+    "run_id": "isruc_cbramod_frozen_channel_patch_s1024_r64_lr2e-4_b8_e20",
+    "artifact_dir": "/panfs/accrepfs.vampire/data/neurogroup/mingyangjiang/EEGxPlore/CBraMod/results/isruc/isruc_cbramod_frozen_channel_patch_s1024_r64_lr2e-4_b8_e20",
+    "method": "interaction_aligned",
+    "axis": "channel_patch",
+    "seed": 1024,
+    "contract_valid": true,
+    "status": "completed",
+    "selected_epoch": 15,
+    "val_selection_value": 0.7176004540063962,
+    "balanced_accuracy": 0.7445908053030473,
+    "cohen_kappa": 0.6956630063753526,
+    "macro_f1": 0.7407857501808257,
+    "weighted_f1": 0.7630493384746424,
+    "trainable_parameters": 21647071,
+    "adapter_delta_ratio": 0.18899254500865936,
+    "backbone_update_norm": 0.0,
+    "candidate_score": 102,
+    "source": "summary.json + test_metrics.json",
+    "candidate": true
+  },
+  {
+    "backbone": "CBraMod",
+    "dataset": "isruc",
+    "run_id": "isruc_cbramod_frozen_channel_patch_s3407_r64_lr2e-4_b8_e20",
+    "artifact_dir": "/panfs/accrepfs.vampire/data/neurogroup/mingyangjiang/EEGxPlore/CBraMod/results/isruc/isruc_cbramod_frozen_channel_patch_s3407_r64_lr2e-4_b8_e20",
+    "method": "interaction_aligned",
+    "axis": "channel_patch",
+    "seed": 3407,
+    "contract_valid": true,
+    "status": "completed",
+    "selected_epoch": 16,
+    "val_selection_value": 0.7328831259422321,
+    "balanced_accuracy": 0.7569716381819159,
+    "cohen_kappa": 0.7134682345216284,
+    "macro_f1": 0.757476801168339,
+    "weighted_f1": 0.7783365086715562,
+    "trainable_parameters": 21647071,
+    "adapter_delta_ratio": 0.217065691947937,
+    "backbone_update_norm": 0.0,
+    "candidate_score": 102,
     "source": "summary.json + test_metrics.json",
     "candidate": true
   },

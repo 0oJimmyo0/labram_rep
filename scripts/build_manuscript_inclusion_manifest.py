@@ -9,8 +9,11 @@ results by score.
 from __future__ import annotations
 
 import csv
+import json
 from collections import defaultdict
 from pathlib import Path
+
+from selfcheck_manuscript_results import canonical_config
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +56,18 @@ def group_key(row):
     return row["backbone"], row["dataset"], row["method"], row["axis"]
 
 
+def homogeneous_configuration(group):
+    """Require the same semantic training configuration at every seed."""
+    try:
+        signatures = {
+            repr(sorted(canonical_config(row).items()))
+            for row in group
+        }
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return len(signatures) == 1
+
+
 def complete_candidate_groups(rows):
     groups = defaultdict(list)
     for row in rows:
@@ -63,6 +78,7 @@ def complete_candidate_groups(rows):
         key: sorted(group, key=lambda row: as_int(row["seed"]) or -1)
         for key, group in groups.items()
         if {as_int(row["seed"]) for row in group} == SEEDS
+        and homogeneous_configuration(group)
     }
 
 
@@ -106,7 +122,7 @@ def main():
     selected = {}
 
     def add_group(key, *roles):
-        if key is None:
+        if key is None or key not in groups:
             return
         for row in groups[key]:
             item = selected.setdefault(row["run_id"], {"row": row, "roles": set(), "selection_rules": set()})

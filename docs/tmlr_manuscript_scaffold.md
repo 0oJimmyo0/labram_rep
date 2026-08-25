@@ -88,7 +88,7 @@ native alignment generally beats generic PEFT or full fine-tuning.
 | --- | --- | --- |
 | CBraMod / FACED | Corrected frozen probe, native channel/patch/channel+patch, generic, LoRA, upper-2, axis-blind; dense and native-full references | Frozen native channel+patch is modestly above the probe, but LoRA and upper-2 are stronger. Full native results are near dense because the backbone is trainable. |
 | CBraMod / SEED-V | Corrected frozen r=64 packet, channel as the only genuine interaction axis, singleton patch control, generic, LoRA, upper-2, axis-blind, native-full channel | Frozen channel does not beat the corrected probe on the three-seed mean; native full channel is competitive with dense. The patch branch is a capacity control, not temporal interaction evidence. |
-| CBraMod / ISRUC | 12-condition x 3-seed packet; dense, probe, native axes, generic, axis-blind, LoRA, upper-2, native-full | Frozen channel+patch is active but below the probe mean; upper-2 and native-full controls are stronger. The result supports bounded adaptation, not universal superiority. |
+| CBraMod / ISRUC | Corrected three-seed r=64 native channel+patch, probe, alpha-zero axis-blind, dense, generic, LoRA, upper-2, and native-full controls | Frozen native channel+patch is below the probe in mean BA; versus the matched axis-blind control it is mixed, with a small positive mean and two positive seeds. This is a conditional, not universal, alignment result. |
 | CBraMod / PhysioNet-MI | 12-condition x 3-seed packet with audit and diagnostics | Frozen native means are approximately probe-level; generic and LoRA are competitive, upper-2 is strongest among constrained controls. Full native patch is near dense but is mostly a full-fine-tuning result. |
 | LaBraM / FACED | Three-seed dense and native patch; corrected frozen dense/patch/generic controls | Frozen dense is underfit, generic is the strongest frozen control, and native patch does not provide a robust positive result. Treat FACED as a boundary/negative case. |
 | LaBraM / SEED-V | Three-seed dense-versus-channel primary packet; corrected controls exist | Native channel is essentially tied with dense and does not establish a consistent gain. The existing protocol remains within-subject and needs a subject-disjoint qualification. |
@@ -105,7 +105,7 @@ kappa-selected checkpoints and test evaluation after selection.
 | Dataset / backbone / condition | Test BA (mean +/- SD) | Reading |
 | --- | ---: | --- |
 | CBraMod / ISRUC / dense | 0.7857 +/- 0.0091 | Dense reference |
-| CBraMod / ISRUC / frozen channel+patch | 0.7554 +/- 0.0076 | Active but below probe/dense mean |
+| CBraMod / ISRUC / frozen channel+patch | 0.7519 +/- 0.0065 | Below the frozen probe in mean BA; mixed versus matched axis-blind |
 | CBraMod / PhysioNet-MI / dense | 0.6228 +/- 0.0035 | Dense reference |
 | CBraMod / PhysioNet-MI / frozen channel+patch | 0.5432 +/- 0.0034 | Approximately probe-level |
 | LaBraM / ISRUC / dense | approximately 0.7936 | Dense reference |

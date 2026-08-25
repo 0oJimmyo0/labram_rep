@@ -1,6 +1,6 @@
 # TMLR artifact registry
 
-Generated from 483 completed artifacts; 265 canonical candidates.
+Generated from 485 completed artifacts; 265 canonical candidates.
 
 Canonical candidates are deterministic suggestions and must be reviewed before final tables.
 
@@ -18,12 +18,12 @@ Canonical candidates are deterministic suggestions and must be reviewed before f
 | CBraMod | faced | native_full_finetune | channel_patch | 3 | 0.5654 ± 0.0042 | 0.5072 ± 0.0042 | 0.5670 ± 0.0031 | 133347419.0000 ± 0.0000 |
 | CBraMod | faced | native_full_finetune | patch | 3 | 0.5667 ± 0.0061 | 0.5102 ± 0.0064 | 0.5719 ± 0.0052 | 133317614.0000 ± 0.0000 |
 | CBraMod | faced | upper_k_finetune | none | 3 | 0.4035 ± 0.0047 | 0.3264 ± 0.0061 | 0.4018 ± 0.0056 | 129209209.0000 ± 0.0000 |
-| CBraMod | isruc | axis_blind | generic_token_control | 3 | 0.7533 ± 0.0078 | 0.7104 ± 0.0108 | 0.7754 ± 0.0082 | 21647410.0000 ± 0.0000 |
+| CBraMod | isruc | axis_blind | generic_token_control | 3 | 0.7473 ± 0.0119 | 0.7026 ± 0.0150 | 0.7680 ± 0.0145 | 21647410.0000 ± 0.0000 |
 | CBraMod | isruc | frozen_probe | none | 3 | 0.7562 ± 0.0033 | 0.7112 ± 0.0099 | 0.7751 ± 0.0092 | 21587461.0000 ± 0.0000 |
 | CBraMod | isruc | full_finetune | none | 3 | 0.7810 ± 0.0105 | 0.7406 ± 0.0116 | 0.8009 ± 0.0082 | 26471261.0000 ± 0.0000 |
 | CBraMod | isruc | generic_bottleneck | none | 3 | 0.7453 ± 0.0063 | 0.7030 ± 0.0074 | 0.7676 ± 0.0042 | 21613726.0000 ± 0.0000 |
 | CBraMod | isruc | interaction_aligned | channel | 3 | 0.7481 ± 0.0041 | 0.7008 ± 0.0088 | 0.7630 ± 0.0100 | 21604700.6667 ± 10881.8979 |
-| CBraMod | isruc | interaction_aligned | channel_patch | 3 | 0.7531 ± 0.0058 | 0.7146 ± 0.0029 | 0.7752 ± 0.0039 | 21621940.3333 ± 21763.7957 |
+| CBraMod | isruc | interaction_aligned | channel_patch | 3 | 0.7519 ± 0.0065 | 0.7070 ± 0.0099 | 0.7716 ± 0.0078 | 21647071.0000 ± 0.0000 |
 | CBraMod | isruc | interaction_aligned | patch | 3 | 0.7484 ± 0.0049 | 0.7033 ± 0.0086 | 0.7667 ± 0.0109 | 21604700.6667 ± 10881.8979 |
 | CBraMod | isruc | lora | none | 3 | 0.7514 ± 0.0045 | 0.7096 ± 0.0085 | 0.7735 ± 0.0063 | 21664261.0000 ± 0.0000 |
 | CBraMod | isruc | native_full_finetune | channel | 3 | 0.7809 ± 0.0058 | 0.7432 ± 0.0010 | 0.8017 ± 0.0020 | 26501066.0000 ± 0.0000 |

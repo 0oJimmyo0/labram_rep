@@ -1,20 +1,17 @@
-# Manuscript-final results snapshot v1
+# Manuscript-final results snapshot v2
 
 This is the focused results package generated from the deterministic compact
 manuscript manifest. It does not modify the broad provenance registry.
 
-- Selected rows: 159
-- Artifact statuses: {'SUPPORTING': 12, 'VERIFIED': 147}
-- Pair statuses: {'primary:VALID': 9}
-- Primary RQ2 pair rows: 9
-- Primary RQ2 metric rows: 18
-- RQ3 metric rows: 60
+- Selected rows: 156
+- Artifact statuses: {'SUPPORTING': 12, 'VERIFIED': 144}
+- Pair statuses: {'primary:VALID': 12}
+- Primary RQ2 pair rows: 12
+- Primary RQ2 metric rows: 24
+- RQ3 metric rows: 66
 
-Primary RQ2 includes complete-seed valid matched pairs in CBraMod/faced/channel_patch, CBraMod/tuev/channel_patch, LaBraM/TUEV/channel_patch.
-ISRUC has three-seed artifacts, but its native channel+patch group mixes
-bottleneck settings across seeds and is therefore excluded from the final
-comparison. SEED-V is a geometry/protocol boundary case; PhysioNet-MI is a
-bounded supporting extension. No row was selected by score.
+Primary RQ2 includes complete-seed valid matched pairs in CBraMod/faced/channel_patch, CBraMod/isruc/channel_patch, CBraMod/tuev/channel_patch, LaBraM/TUEV/channel_patch.
+No row was selected by score.
 
 Key files:
 

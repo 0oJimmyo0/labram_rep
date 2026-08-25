@@ -1785,3 +1785,45 @@ checkpoints, and final test metrics. The immediate order is FACED data audit,
 seed-42 dense smoke, seed-42 native-branch screen, then the locked three-seed
 packet `{42,1024,3407}`. The axis-blind control and cross-backbone aggregation
 remain later TMLR closure work, as planned.
+## CBraMod ISRUC r64 repair and manuscript evidence v2 (2026-08-21)
+
+The audit-driven CBraMod/ISRUC native channel-plus-patch repairs completed
+successfully:
+
+| Seed | Job | Run ID | Selected epoch | Test BA | Test macro-F1 | Test kappa |
+|---:|---:|---|---:|---:|---:|---:|
+| 42 | existing | `isruc_cbramod_frozen_channel_patch_s42_lr2e-4_b8_e20` | 9 | 0.75410 | 0.74715 | 0.71196 |
+| 1024 | 13512637 | `isruc_cbramod_frozen_channel_patch_s1024_r64_lr2e-4_b8_e20` | 15 | 0.74459 | 0.74079 | 0.69566 |
+| 3407 | 13512638 | `isruc_cbramod_frozen_channel_patch_s3407_r64_lr2e-4_b8_e20` | 16 | 0.75697 | 0.75748 | 0.71347 |
+
+Both repairs use the seed-42 operational configuration, including
+`interaction_aligned`, `channel_patch`, bottleneck `64`, four heads, adapter
+LR `2e-5`, classifier LR `3.536e-4`, batch size `8`, 20 epochs, gamma `1.0`,
+init alpha `0.01`, zero-initialized output, and the same strict pretrained
+checkpoint. Each artifact has strict checkpoint loading, expected ISRUC
+geometry `[B,20,6,30,200]`, frozen-backbone mode evidence, and 20 epoch
+metric/adapter-diagnostic records.
+
+The corrected primary aggregates are in
+`analysis/tmlr_manuscript/manuscript_final_v2/`. The native adapter has
+`59,610` adaptation-module parameters versus `59,949` for the alpha-zero
+axis-blind control; the final pair audit reports a `0.5655%` mismatch for all
+three seeds. The v2 package contains 156 selected rows, 12 valid primary RQ2
+seed-pairs, and four complete primary RQ2 cells, including CBraMod/ISRUC.
+The fail-closed self-check passes with zero errors and zero warnings.
+
+CBraMod/ISRUC interpretation under the corrected r64 condition:
+
+- Native frozen adaptation is below the frozen probe in mean test BA by
+  `-0.00432` and in mean macro-F1 by `-0.00317`; BA is lower for all three
+  seeds.
+- Native channel-plus-patch versus matched axis-blind adaptation is mixed:
+  mean BA effect `+0.00456 +/- 0.01775` and mean macro-F1 effect
+  `+0.00536 +/- 0.02156`, with two of three seeds positive for both metrics.
+- This repairs the condition-consistency problem but does not turn ISRUC
+  into a uniform positive result. It supports the paper's conditional claim
+  that native alignment can be useful without being universally superior.
+
+`manuscript_final_v1` is retained as the superseded audit snapshot; v2 is the
+current manuscript-facing package. No additional CBraMod/ISRUC training is
+justified by these results.

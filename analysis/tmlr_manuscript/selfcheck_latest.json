@@ -1,0 +1,862 @@
+{
+  "status": "PASS",
+  "source_manifest": "/panfs/accrepfs.vampire/data/neurogroup/mingyangjiang/EEGxPlore/LaBraM/analysis/tmlr_manuscript/manuscript_inclusion_manifest.csv",
+  "source_manifest_sha256": "0b2a9dea7ad9cd4464191cf73be3032f83266f0d8056f7daedeac139cc580615",
+  "selected_rows": 156,
+  "registry_rows": 485,
+  "group_count": 52,
+  "error_count": 0,
+  "warning_count": 0,
+  "issues": [],
+  "groups": [
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "axis_blind",
+      "variant": "generic_token_control",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "full_finetune",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "generic_bottleneck",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "interaction_aligned",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1",
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "lora",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "native_full_finetune",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "faced",
+      "method": "upper_k_finetune",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "isruc",
+      "method": "axis_blind",
+      "variant": "generic_token_control",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "isruc",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "isruc",
+      "method": "interaction_aligned",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1",
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "physionet_mi",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "physionet_mi",
+      "method": "generic_bottleneck",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "physionet_mi",
+      "method": "interaction_aligned",
+      "variant": "channel",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "physionet_mi",
+      "method": "lora",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "physionet_mi",
+      "method": "upper_k_finetune",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "seedv",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "seedv",
+      "method": "full_finetune",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "seedv",
+      "method": "generic_bottleneck",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "seedv",
+      "method": "interaction_aligned",
+      "variant": "channel",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "seedv",
+      "method": "lora",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "seedv",
+      "method": "native_full_finetune",
+      "variant": "channel",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "seedv",
+      "method": "upper_k_finetune",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "axis_blind",
+      "variant": "generic_token_control",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "full_finetune",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "generic_bottleneck",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "interaction_aligned",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1",
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "lora",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "native_full_finetune",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "CBraMod",
+      "dataset": "tuev",
+      "method": "upper_k_finetune",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "FACED",
+      "method": "frozen_native_generic",
+      "variant": "generic",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "FACED",
+      "method": "frozen_native_patch",
+      "variant": "patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "FACED",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "FACED",
+      "method": "lora",
+      "variant": "qkv",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "FACED",
+      "method": "upper2",
+      "variant": "upper",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "PhysioNet-MI",
+      "method": "dense",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "PhysioNet-MI",
+      "method": "frozen_native_channel_patch",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "PhysioNet-MI",
+      "method": "frozen_native_generic",
+      "variant": "generic",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "PhysioNet-MI",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "PhysioNet-MI",
+      "method": "lora",
+      "variant": "qkv",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "PhysioNet-MI",
+      "method": "native_channel_patch",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "PhysioNet-MI",
+      "method": "upper2",
+      "variant": "upper",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "SEED-V",
+      "method": "frozen_native_generic",
+      "variant": "generic",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "SEED-V",
+      "method": "lora",
+      "variant": "qkv",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "SEED-V",
+      "method": "upper2",
+      "variant": "upper",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "BOUNDARY",
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "TUEV",
+      "method": "axis_blind",
+      "variant": "generic_token_control",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "TUEV",
+      "method": "frozen_native_channel_patch",
+      "variant": "channel_patch",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1",
+        "RQ2"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "TUEV",
+      "method": "frozen_native_generic",
+      "variant": "generic",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "TUEV",
+      "method": "frozen_probe",
+      "variant": "none",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ1"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "TUEV",
+      "method": "lora",
+      "variant": "qkv",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "CONTEXT"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    },
+    {
+      "backbone": "LaBraM",
+      "dataset": "TUEV",
+      "method": "upper2",
+      "variant": "upper",
+      "seeds": [
+        "42",
+        "1024",
+        "3407"
+      ],
+      "roles": [
+        "RQ3"
+      ],
+      "complete_three_seed": true,
+      "configuration_homogeneous": true
+    }
+  ],
+  "final_contract_version": "manuscript_final_v2"
+}

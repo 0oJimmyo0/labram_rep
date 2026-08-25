@@ -1,6 +1,7 @@
 # TMLR manuscript closure checklist
 
-Status: audited 2026-08-15
+Status: audited 2026-08-21; manuscript evidence v2 generated after the
+CBraMod/ISRUC condition-consistency repair.
 
 This checklist supersedes older “remaining runs” notes when they conflict with
 completed artifacts. It is deliberately separated from the historical
@@ -231,3 +232,23 @@ Audited after jobs `13421416:13421421` completed:
   and applies the frozen sequence encoder before comparing repeated passes.
   Dummy and actual-model smoke tests passed. Retry jobs are `13422949` (seed
   42), `13422950` (seed 1024), and `13422951` (seed 3407).
+
+## Latest CBraMod/ISRUC repair audit
+
+The two prespecified native channel-plus-patch repairs completed successfully:
+
+- job `13512637`: seed `1024`, bottleneck `64`;
+- job `13512638`: seed `3407`, bottleneck `64`.
+
+Both artifacts passed strict checkpoint loading, ISRUC geometry checks,
+frozen-backbone mode checks, and 20/20 epoch-record checks. The native
+adaptation-module count is `59,610` for all three seeds. The selected
+alpha-zero axis-blind controls contain `59,949` adaptation-module parameters,
+giving a final pair-audit mismatch of `0.5655%`, below the 5% contract.
+
+The regenerated package is
+`analysis/tmlr_manuscript/manuscript_final_v2/`; it contains 156 selected
+rows, 12 valid primary RQ2 seed-pairs, and complete primary RQ2 cells for
+CBraMod/FACED, CBraMod/ISRUC, CBraMod/TUEV, and LaBraM/TUEV. The self-check
+passes with zero errors and zero warnings. `manuscript_final_v1` remains the
+superseded pre-repair snapshot and is not overwritten.

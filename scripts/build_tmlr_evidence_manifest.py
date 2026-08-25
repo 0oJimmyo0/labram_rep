@@ -10,10 +10,13 @@ that answer the manuscript research questions.
 from __future__ import annotations
 
 import csv
+import json
 import math
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
+
+from selfcheck_manuscript_results import canonical_config
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -92,6 +95,48 @@ def group_key(row):
     return row["backbone"], row["dataset"], row["method"], row["axis"]
 
 
+def homogeneous_configuration(group):
+    """Require one semantic resolved configuration across canonical seeds."""
+    try:
+        signatures = {
+            repr(sorted(canonical_config(row).items()))
+            for row in group
+        }
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return len(signatures) == 1
+
+
+def adapter_parameter_count(row):
+    """Return the trainable adaptation-module count used for RQ2 matching."""
+    artifact = Path(row.get("artifact_dir", ""))
+    try:
+        if row["backbone"] == "CBraMod":
+            report_path = artifact / "trainability_report.json"
+            if report_path.exists():
+                report = json.loads(report_path.read_text())
+                components = report.get("component_trainable_parameter_counts", {})
+                if components.get("adapter") is not None:
+                    # Residual scaling parameters are part of the adapter
+                    # module and must be included in capacity matching.
+                    return int(components["adapter"]) + int(components.get("adapter_scalar", 0) or 0)
+            report_path = artifact / "checkpoint_load_report.json"
+            if report_path.exists():
+                report = json.loads(report_path.read_text())
+                if report.get("adapter_parameter_count") is not None:
+                    return int(report["adapter_parameter_count"])
+        else:
+            config_path = artifact / "run_config.json"
+            if config_path.exists():
+                config = json.loads(config_path.read_text())
+                for key in ("trainable_adapter_parameters", "adapter_parameter_count"):
+                    if config.get(key) is not None:
+                        return int(config[key])
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return None
+
+
 def scope_note(row):
     dataset = row["dataset"].lower()
     if dataset == "seedv":
@@ -118,15 +163,19 @@ def classify(rows):
         group = candidate_groups[group_key(row)]
         group_seeds = {as_int(item["seed"]) for item in group}
         complete = group_seeds == SEEDS
+        homogeneous = homogeneous_configuration(group)
         run_id = row["run_id"].lower()
         noisy = any(token in run_id for token in (
             "smoke", "audit", "boundary", "stability15", "headdropout",
             "corrected_gate", "repair", "source_fidelity", "pilot", "dev",
         ))
 
-        if candidate and strict and complete:
+        if candidate and strict and complete and homogeneous:
             status = "PRIMARY"
             reason = "strict canonical three-seed group"
+        elif candidate and strict and complete:
+            status = "SUPPORTING"
+            reason = "strict artifact but canonical group mixes resolved configurations"
         elif candidate and strict:
             status = "SUPPORTING"
             reason = "strict artifact but canonical group is incomplete"
@@ -162,9 +211,11 @@ def classify(rows):
         row["evidence_reason"] = reason
         row["scope_note"] = scope_note(row)
         row["seed_int"] = seed
+        row["adapter_parameter_count"] = adapter_parameter_count(row)
         row["canonical_group_n"] = len(group)
         valid_group_seeds = sorted(x for x in group_seeds if x is not None)
         row["canonical_group_seeds"] = ",".join(str(x) for x in valid_group_seeds)
+        row["configuration_homogeneous"] = "true" if homogeneous else "false"
         row["alignment_control_available"] = "unknown"
         row["probe_available"] = "unknown"
         row["rq1_eligible"] = "no"
@@ -210,8 +261,8 @@ def is_frozen_regime(row):
 
 
 def parameter_match_pct(left, right):
-    left_value = as_float(left.get("trainable_parameters"))
-    right_value = as_float(right.get("trainable_parameters"))
+    left_value = as_float(left.get("adapter_parameter_count"))
+    right_value = as_float(right.get("adapter_parameter_count"))
     if left_value is None or right_value is None or right_value == 0:
         return None
     return abs(left_value - right_value) / abs(right_value) * 100.0
@@ -284,6 +335,7 @@ def pair_rows(rows, left_method, right_method, comparison):
                 "effect_left_minus_right": left_value - right_value,
                 "left_better": int(left_value > right_value),
                 "parameter_match_pct": match_pct,
+                "parameter_matching_basis": "adapter_module_parameters",
                 "pair_validity": pair_validity,
                 "pair_contract_valid": pair_contract_valid,
                 "pair_artifacts_verified": "False",
@@ -483,9 +535,11 @@ def main():
         "backbone", "dataset", "run_id", "artifact_dir", "method", "axis", "seed",
         "candidate", "candidate_score", "contract_valid", "status", "selected_epoch",
         "val_selection_value", *METRICS, "trainable_parameters", "adapter_delta_ratio",
+        "adapter_parameter_count",
         "backbone_update_norm", "evidence_status", "candidate_status", "artifact_status",
         "manual_status", "evidence_reason", "scope_note",
-        "canonical_group_n", "canonical_group_seeds", "alignment_control_available",
+        "canonical_group_n", "canonical_group_seeds", "configuration_homogeneous",
+        "alignment_control_available",
         "probe_available", "rq1_eligible", "rq2_eligible", "rq3_eligible", "rq4_eligible",
         "reviewed_by", "review_date", "review_notes", "source_log_path",
         "previous_status", "status_change_reason", "status_change_date", "exclusion_reason_code", "source",
@@ -499,6 +553,7 @@ def main():
     review_fields = [
         "backbone", "dataset", "run_id", "artifact_dir", "method", "axis", "seed",
         "candidate_status", "artifact_status", "manual_status", "evidence_reason",
+        "configuration_homogeneous",
         "contract_valid", "selected_epoch", "val_selection_value", *METRICS,
         "trainable_parameters", "source_log_path", "reviewed_by", "review_date",
         "review_notes", "previous_status", "status_change_reason", "status_change_date",
